@@ -1,0 +1,111 @@
+# Prophet
+
+**Prophet** is a from-scratch, GPU-first 3D game engine in **pure, class-based JavaScript**. It runs on **WebGPU compute**, uses **Web Workers** for multithreading, and draws its UI with **real HTML/CSS**. One web build ships to browsers, Steam (via Electron), the App Store and Google Play.
+
+**SCRAPWAKE** is its first game: a roguelite that crosses Vampire Survivors with tower defence, set in a fully destructible voxel cyberpunk city. You play a broken robot that rebuilds itself from the scrap it finds.
+
+> **Status: M0 Concept.** This repository contains the design and architecture docs only. No code yet. The docs are the contract for the first milestones ([ROADMAP](docs/ROADMAP.md)).
+
+---
+
+## The game in one screen
+
+> *"Rebuild yourself from scrap. Tear down the city. Hold the Forge."*
+
+In the megacity **Meridian**, the corporation **HALCYON** runs "Clean Sweep" drone swarms that erase every unlicensed machine. **PATCH**, a scrapped maintenance robot, reboots as a legless husk beside a derelict fabricator: **the Forge**. Each run (a "Cycle") takes place in a procedural district of about 20 minutes:
+- Roam the city and fight endless swarms, Vampire Survivors-style.
+- **Tear buildings down** for scrap, and collapse them onto the swarm.
+- **Rebuild your body** part by part. Every arm, leg, back and head module is a weapon or ability you can see.
+- Race back to **hold the Forge** with towers and walls when the Sweep assault hits.
+
+**Pillars:**
+1. **You are your build.** PATCH's body is the loadout. Four weapon hardpoints plus core, legs and chips, all visible.
+2. **Everything breaks.** The voxel city is a weapon, a resource and a tactic.
+3. **Hold the Forge.** A base to fortify, with towers and walls that reshape the swarm's paths.
+4. **Readable chaos.** Orange is you, cyan is them. Pixel-exact 3D pixel art keeps thousands of enemies legible.
+5. **One more cycle.** Short runs, deep synergies, meta progression.
+
+**Why it can stand out.** No hit game yet combines survivors-style combat, in-run base building and tower defence, and destructible voxel terrain. A robot whose body *is* the build, visibly falling apart and reassembling, is unclaimed territory ([competitive landscape](docs/game/01-gdd.md#competitive-landscape)).
+
+## The engine in one screen
+
+| | |
+|---|---|
+| **Language** | Pure ES2023+ JavaScript classes. Zero runtime dependencies; JSDoc + `tsc --checkJs` for types. |
+| **GPU** | WebGPU only, core feature level. Heavy compute: GPU swarm simulation, culling, particles, light binning. |
+| **Threads** | Engine worker (simulation + GPU) + job workers over a fixed shared heap, with fallbacks when shared memory is unavailable. |
+| **ECS** | Archetype SoA ECS. Systems are classes; the scheduler parallelizes wherever profiling says it pays off. |
+| **Simulation** | Two tiers: CPU actors plus a GPU-resident swarm of tens of thousands of units. Integer-only and deterministic (replays; co-op-ready). |
+| **World** | 0.25 m voxels, structural-graph collapse, flow-field navigation, seeded procedural districts. |
+| **Look** | Pixel-exact 3D pixel art: integer-scaled low-res render, outlines, toon ramps, palette LUT, neon bloom. |
+| **UI** | Real DOM with custom elements and modern CSS (flexbox, grid, container queries, `:has()`), fed by a seqlocked state bridge. |
+| **Platforms** | Web (PWA), Electron (Windows, macOS, Linux, Steam Deck), iOS 26+ WKWebView host, Android TWA. |
+
+## Read the docs
+
+**Suggested reading order:**
+1. [Game Design Document](docs/game/01-gdd.md)
+2. [Engine overview](docs/engine/01-overview.md)
+3. [Budgets](docs/BUDGETS.md)
+4. [Roadmap](docs/ROADMAP.md)
+
+| Doc | What's inside |
+|---|---|
+| [DECISIONS](docs/DECISIONS.md) | Every architecture and design decision (ADRs), with the rationale and when to revisit it |
+| [BUDGETS](docs/BUDGETS.md) | **Single source of truth for every number:** tiers, reference devices, frame and memory budgets, caps, constants, quality gates |
+| [GLOSSARY](docs/GLOSSARY.md) | Engine and game terminology |
+| [ROADMAP](docs/ROADMAP.md) | Risk-first milestones with exit metrics, risk register, cut list |
+| [VERTICAL-SLICE](docs/VERTICAL-SLICE.md) | Slice content scope and the Minimum Viable Engine |
+| **Engine** | |
+| [01 Overview](docs/engine/01-overview.md) | Goals, principles, runtime topology, frame pipeline, repo layout, JS conventions |
+| [02 Core: ECS & jobs](docs/engine/02-core-ecs-jobs.md) | Shared heap and arenas, ECS, scheduler, job system, threading tiers |
+| [03 Rendering](docs/engine/03-rendering.md) | WebGPU device, render graph, GPU-driven rendering, lighting, readback ring, device loss |
+| [04 Pixel-art pipeline](docs/engine/04-pixel-art-pipeline.md) | Projection, resolution and scaling, snapping, outlines, grading, occlusion |
+| [05 GPU swarm](docs/engine/05-gpu-swarm.md) | The GPU-resident swarm and the CPU-GPU contract |
+| [06 World](docs/engine/06-world.md) | Voxels, destruction, collision, navigation, procedural generation |
+| [07 UI](docs/engine/07-ui.md) | DOM architecture, state bridge, CSS system, input, accessibility |
+| [08 Platforms](docs/engine/08-platforms.md) | Web, Electron, iOS, Android, Steam, saves, tier detection |
+| [09 Determinism & co-op](docs/engine/09-determinism-coop.md) | Integer simulation, RNG, replays, co-op model |
+| [10 Tooling & testing](docs/engine/10-tooling-testing.md) | Dev server, build, asset pipeline, dev tools, tests, CI |
+| **Game** | |
+| [01 GDD](docs/game/01-gdd.md) | Loop, body-as-loadout, economy, base and towers, destruction, enemies, pacing, balance, meta, KPIs, market |
+| [02 Content](docs/game/02-content.md) | Parts, chips, fusions, towers, enemies, bosses, districts, events |
+| [03 Art & audio](docs/game/03-art-audio.md) | Palette, scale, lighting, characters, VFX, UI look, HUD wireframes, audio |
+| [04 UX flows](docs/game/04-ux-flows.md) | Screens and flows for keyboard/mouse, gamepad and touch |
+
+## Minimum spec (summary)
+
+Any browser with WebGPU:
+- Chrome/Edge 113+
+- Safari 26+ on macOS and iOS
+- Firefox 141+ on Windows, 145+ on Apple Silicon
+
+Plus the desktop app (Electron) on Windows, macOS, Linux and Steam Deck, iPhone 13 or newer on iOS 26, and recent Android phones through Chrome. Details: [ADR-020](docs/DECISIONS.md#adr-020-minimum-spec).
+
+## Roadmap (summary)
+
+1. **M1:** platform spike.
+2. **M2:** GPU swarm spike, with a throwaway 2D loop prototype in parallel (M2′).
+3. **M3:** world spike.
+4. **M4:** look-dev.
+5. **M5:** Minimum Viable Engine.
+6. **M6:** vertical slice.
+7. **M7:** Steam Early Access + web demo.
+8. **M8:** 1.0 + mobile stores + portals.
+
+Details and exit metrics: [ROADMAP](docs/ROADMAP.md).
+
+## Repository layout (planned)
+
+```
+engine/     Prophet: pure JS, zero runtime dependencies
+game/       SCRAPWAKE: components, systems, shaders, UI, data, assets
+platforms/  electron/ · ios/ · android/
+tools/      dev server, build, asset cooker, generators
+tests/      unit · browser (WebGPU) · perf · replay
+docs/       this concept
+```
+
+## License
+
+To be decided before the first code lands.
