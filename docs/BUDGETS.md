@@ -339,3 +339,4 @@ Rationale and the alternative candidate are in [engine/04-pixel-art-pipeline.md]
 | Date | Change |
 |---|---|
 | 2026-09-25 | Initial concept numbers (M0) |
+| 2026-09-26 | M0 review: K raised to 4 (desktop) / 8 (mobile) ticks with a p99 readback rule; readback ring depth; sim profiles; async commit lags; Q16/Q12 formats; state-hash interval; co-op input delay; ECS chunk size; density-map cell; portal payload caps; quality gates |

@@ -88,12 +88,7 @@ The canonical file is `game/ui/palette.css` (proposed). The DOM UI imports it ([
 | **Environment** | Night, Steel, Concrete, Rust | The city | Environment neon sits above head height, reads as text or logos, and is dimmer than gameplay emissives |
 | **Neutral UI** | Bone, Concrete 400 | Text | Bone is the only warm white |
 
-**Outlines** apply to actors only ([outlines](../engine/04-pixel-art-pipeline.md#outlines)):
-- PATCH, towers and drones: Sodium, so team colour survives any lighting.
-- Sweep specialists and bosses: Night 900.
-- Elites: Holo white, with a marching dash.
-
-The high-contrast option adds a Holo white rim to every Sweep unit ([accessibility](01-gdd.md#accessibility)).
+**Outlines** apply to actors only ([outlines](../engine/04-pixel-art-pipeline.md#outlines)). PATCH, towers and drones get Sodium, so team colour survives any lighting. Sweep specialists and bosses get Night 900, and elites get Holo white with a marching dash. The high-contrast option adds a Holo white rim to every Sweep unit ([accessibility](01-gdd.md#accessibility)).
 
 ### Rarity colours
 
@@ -168,6 +163,7 @@ All pixel constants are in [BUDGETS: pixel & camera constants](../BUDGETS.md#pix
 **Towers** stand on the build grid ([BUDGETS: world constants](../BUDGETS.md#world-constants)). A one-tile tower is about as wide as PATCH and 1–2 P tall; a Mk III top piece may add up to 50%.
 
 **World.**
+
 - **Height cap.** Building height is capped by the district height ([BUDGETS: world constants](../BUDGETS.md#world-constants)). At default zoom a full-height block fills most of the screen, so kits near the play space favour 2–4 storeys and tall landmarks sit toward district edges.
 - **Roof peel.** Roofs and upper floors near PATCH, the cursor and the Forge peel away with a dithered cut. Occluded PATCH, enemies and towers show x-ray silhouettes in their family colour ([occlusion handling](../engine/04-pixel-art-pipeline.md#occlusion-handling)).
 - **Four-sided assets.** Camera yaw snaps to fixed quarter turns ([BUDGETS](../BUDGETS.md#pixel--camera-constants)), so every asset must read from all four sides: no front-only details, and signs on at least two faces of a building.
@@ -227,14 +223,10 @@ Actors never shade below a minimum light level, so PATCH and the Sweep read even
 - **Dangling cables.** One to three loose cables hang from sockets on springs. They are cheap to render and make PATCH feel alive and improvised.
 - **Blue creeps in.** Halcyon parts keep their blue, so a late-run PATCH visibly carries stolen corp tech. Orange stays dominant: every stolen part gets a hand-painted orange claim slash, and cyan stays under ~40% of PATCH's emissive pixels.
 - **Plating** is bolted on inside the silhouette: bare frame, then patched plates, then full plating with amber hazard trim.
-- **Chassis looks** ([meta progression](01-gdd.md#meta-progression)) change paint and starting parts, never the body:
-  - Mender, the default: welding torch, amber cross decals.
-  - Bulwark: wide stance, riot plate, a turret pack on the back.
-  - Skitter: light frame, sprinter legs, antenna whips.
-  - Wrecker: hazard stripes, drill fist.
+- **Chassis looks** ([meta progression](01-gdd.md#meta-progression)) change paint and starting parts, never the body: Mender, the default (welding torch, amber cross decals); Bulwark (wide stance, riot plate, a turret pack on the back); Skitter (light frame, sprinter legs, antenna whips); Wrecker (hazard stripes, drill fist).
 - **Visible progression**, from husk to full body:
-  - **Husk:** torso, optic and one arm weapon, dragging itself along. This is the start of every run (except for Skitter) and the state after a Shatter.
-  - **Walker:** stands up on legs from the guaranteed cache ([FTUE](01-gdd.md#first-time-user-experience)).
+  - **Husk:** torso, optic and one arm weapon, dragging itself along. Every run starts here (except with Skitter), and a Shatter returns PATCH to it.
+  - **Walker:** standing on legs from the guaranteed cache ([FTUE](01-gdd.md#first-time-user-experience)).
   - **Built:** all four hardpoints filled, plating visible.
   - **Evolved:** fusion parts with unique silhouettes ([fusions](02-content.md#fusions)).
 

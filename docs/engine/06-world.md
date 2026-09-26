@@ -388,7 +388,8 @@ The cooker rejects a kit when:
 - two element boxes overlap;
 - a structural voxel belongs to no element and no attachment;
 - an element has no support path to `ground`;
-- a socket lies off the module boundary.
+- a socket lies off the module boundary;
+- a walkable storey or doorway is shorter than 3 m (12 voxels), because PATCH stands 2.5–2.75 m tall ([BUDGETS: pixel constants](../BUDGETS.md#pixel--camera-constants)).
 
 ## Thread ownership
 

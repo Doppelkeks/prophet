@@ -14,7 +14,7 @@ These terms are used across the Prophet engine docs and the SCRAPWAKE game docs.
 | **Banked level-up** *(game)* | Level-ups queue up instead of interrupting play. The player opens them when it suits them, or at auto-prompts during lulls. |
 | **Base field** *(engine)* | Flow field whose goal is the Forge. Assault units follow it. |
 | **Blueprint ghost** *(game)* | A planned structure placed on the build grid. Forge drones construct it in real time. |
-| **Breacher** *(game)* | Specialist that tunnels through voxels and walls toward the Forge. Every assault includes one "Prime" Breacher that only PATCH can damage. |
+| **Breacher** *(game)* | Specialist that tunnels through voxels and walls toward the Forge. Every assault includes one **Breacher Prime** that only PATCH can damage. |
 | **Brickmap** *(engine)* | Two-level sparse voxel structure used by the alternative compute-raymarch renderer (a look-dev spike). |
 | **Chassis** *(game)* | A starting kit for PATCH (Mender, Bulwark, Skitter, Wrecker), unlocked in the Workshop. |
 | **Chip** *(game)* | Passive modifier. PATCH has 6 chip slots. |

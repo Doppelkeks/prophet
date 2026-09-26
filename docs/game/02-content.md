@@ -329,7 +329,7 @@ Palette tokens are named, not specified here ([palette](03-art-audio.md#palette)
 | **Rust Docks** | Slice | Container port: gantry cranes, container stacks, warehouses, fuel depots, piers | Rust and Concrete under Night; sodium floodlights kept dimmer than PATCH's orange | Fuel tanks, toppling cranes, transformer yards | Demolisher / Warden Titan |
 | **Neon Bazaar** | 1.0 | Stacked night market: stalls, awnings, sign-choked alleys, cable webs | Dense signage in both families (Sodium and Amber, Halcyon cyan and Holo white) over Night and Concrete | Neon signs, gas cookers, live hanging cables (Shock) | Hive Queen / Warden Titan variant |
 | **Glasswall** | 1.0 | Corporate glass towers, plazas, skybridges, security posts | Steel and Concrete with Electric blue reflections | Glass rain from collapses, hackable Halcyon security turrets, mirror panels that reflect beams | Demolisher variant / Warden Titan variant |
-| **The Sump** | 1.0 | Flooded undercity: pump stations, pipe galleries, sludge canals | Night and Rust with Ember vent glow | Sludge (−40 % ground speed for everyone), methane vents, flood surges | Demolisher variant / Hive Queen |
+| **The Sump** | 1.0 | Flooded undercity: pump stations, pipe galleries, sludge canals | Night and Rust with Sodium vent glow | Sludge (−40 % ground speed for everyone), methane vents, flood surges | Demolisher variant / Hive Queen |
 | **Halcyon Spire** | 1.0 | Pristine corporate campus around the Sweep's core | Holo white and muted Halcyon cyan over Steel | Security laser grids, regrowing nanite walls | Hive Queen variant / Sweep Nexus |
 
 | District | Material mix (structure voxels) | Demolition H | Signature rule |

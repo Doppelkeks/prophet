@@ -208,7 +208,7 @@ The starting PATCH (Mender Chassis) has a Rivet Driver on ARM R, a Cracked Core,
 - **Banked level-ups** ([ADR-023](../DECISIONS.md#adr-023-banked-level-ups-and-real-time-building)). A HUD badge counts pending levels. The player opens the bank at any time (single-player pauses while it is open), and it auto-opens during lulls (a setting, on by default). Each banked level rolls its cards from the seed when it is earned, so reopening never rerolls.
   - **Card types:** *new part*, *part upgrade* (includes Plating), *chip* (new, or +1 level), *tower blueprint*, *Forge upgrade*. Three cards per level (four with a Workshop unlock), at most two of one type. A blueprint is guaranteed within the first three level-ups, and empty hardpoints double the weight of new-part cards.
   - **Reroll, skip and banish** are Workshop unlocks with per-run charges. Skip pays 25 % of that level's requirement into the balance.
-- **Fabricator.** Opens after each held assault and stays open until the next siren, usable only while PATCH is in the Yard. Four stock slots: two parts or chips (rarity rises per assault), one Forge service (repair, Power Cell; Backup Kernel in 1.0), one blueprint or Mk voucher. Rerolling costs 20 × g², rising with each reroll.
+- **Fabricator.** Opens after each held assault and stays open until the next siren, usable only while PATCH is in the Yard. Four stock slots: two parts or chips (rarity rises per assault), one Forge service (repair, Power Cell; Backup Kernel in 1.0), one blueprint or Mk voucher. Rerolling costs 20 × g², rising with each reroll. Like a level-up, the open fabricator pauses the game in single-player, and never in co-op.
 
 **Numbers.** Level curve, income, prices and Power: [Balance math](#balance-math).
 
@@ -243,7 +243,7 @@ The starting PATCH (Mender Chassis) has a Rivet Driver on ARM R, a Cracked Core,
 | Foundation | Reinforced and indestructible; debris landing on it is cleared (anti-cheese) |
 
 **Rules.**
-- **Build grid.** Structures snap to build-grid tiles ([tile size](../BUDGETS.md#world-constants)) and can only be placed inside the Yard. Snap assistance: walls drag-paint as lines with automatic corners; *suggested spots* highlight tiles where the base field concentrates; invalid ghosts turn hatched red and name the reason (blocked, no Power, outside the Yard).
+- **Build grid.** Structures snap to build-grid tiles ([tile size](../BUDGETS.md#world-constants)) and can only be placed inside the Yard. Snap assistance: walls drag-paint as lines with automatic corners; *suggested spots* highlight tiles where the base field concentrates; invalid ghosts turn to a grey hatch with a cross mark (red is reserved for critical danger) and name the reason (blocked, no Power, outside the Yard).
 - **Blueprint ghosts.** Placing a ghost reserves its cost. Forge drones fly out and build it in real time; the game never slows down. Construction pauses when no drone is on site, and a ghost can be damaged (its HP is proportional to its progress). Cancelling refunds 100 % until it completes; selling refunds 50 % of the price paid.
 - **Tiers.** Towers upgrade Mk I → Mk II (1.5 × base cost) → Mk III (3 × base cost). Mk III is a **branch choice** between two specialisations ([towers](02-content.md#towers)).
 - **Power.** Each tower type has a fixed draw; walls draw nothing. A ghost needs free Power to be placed. If capacity drops (for example, a Generator dies), the most recently built towers **brown out** until the draw fits again.
@@ -613,7 +613,7 @@ Principles:
 | 0:00 | Boot | Black screen; PATCH's optic flickers on; one bleep. A one-line world-space readout: LOCOMOTION NOT FOUND. |
 | 0:03 | Move as a husk | The move glyph sits under PATCH until the first input. |
 | 0:05 | Auto-fire | Three slow Scrubbers approach and the Rivet Driver fires on its own. No prompt. |
-| 0:08 | Legs | A pulsing orange beam marks the legs cache a few tiles away; a hold-to-open glyph; the paper doll shows an all-green stat diff; PATCH stands up by 0:20. |
+| 0:08 | Legs | A pulsing orange beam marks the legs cache a few tiles away; a hold-to-open glyph; the paper doll shows an all-gain stat diff (amber ▲ markers); PATCH stands up by 0:20. |
 | 0:30 | First level-up | Auto-opens at the first lull, which this early comes almost at once. A new ARM L part is the highlighted card. Afterwards the bank badge shows its button glyph. |
 | 1:00 | Destruction pays | A rim-lit fuel tank sits beside a Mite cloud. Shooting it collapses a facade, and the scrap chunks fly to PATCH. |
 | 1:40 | Home and build | The Forge pings (orange pulse, edge arrow). In the Yard, a Rivet Turret ghost waits on a suggested spot: one confirm and the drones build it. A dotted wall-line suggestion closes the nearest gap. |

@@ -1,6 +1,7 @@
 # SCRAPWAKE: UX Flows
 
 This doc specifies every SCRAPWAKE screen and flow for keyboard and mouse (KB/M), gamepad and touch: the screen map, the first-time user experience (FTUE), the HUD, level-up, build mode, Assembly, the fabricator, pause and settings, and results.
+
 - **Rules and tuning** live in the [GDD](01-gdd.md); the default bindings here mirror its controls table.
 - **Look, palette and ASCII wireframes** are in [03-art-audio](03-art-audio.md#hud-wireframes).
 - **UI architecture** (custom elements, state bridge, CSS rules, input plumbing) is in [engine/07-ui](../engine/07-ui.md).
@@ -69,7 +70,7 @@ flowchart TD
   FAB --> RUN
   RUN --> PAUSE
   PAUSE --> RUN
-  RUN -- "scrapped, Forge lost or extract" --> RES
+  RUN -- "scrapped, Forge lost or clock out" --> RES
   PAUSE -- "abandon" --> RES
   RES -- "continue" --> WS
   RES -- "retry seed" --> CH
@@ -91,7 +92,7 @@ Settings and the read-only Codex are also reachable from the Title and from Paus
 | Assembly | Inspect the body, set targeting modes, install and salvage parts | Hotkey, BODY button, opening a part cache | Run | [Assembly screen](#assembly-screen) |
 | Fabricator | Shop between a held assault and the next siren | Interact at the Forge while PATCH is in the Yard | Run | [Fabricator](#fabricator) |
 | Pause and settings | Pause, settings, abandon | Pause input, focus loss, app suspend | Run, Results, Title | Menu left, settings tabs right |
-| Results | Summary, Sparks, unlocks, stats, seed | Run ends, extract, abandon | Workshop, Chassis select | [Results](#results) |
+| Results | Summary, Sparks, unlocks, stats, seed | Run ends, clock out, abandon | Workshop, Chassis select | [Results](#results) |
 | Codex | Memory fragments (lore), enemy and part entries | Title, Workshop, Pause | Back | Category list left, entry right |
 | Achievements | Progress and the content each unlocks | Title, Workshop | Back | Grid with progress bars |
 
@@ -106,7 +107,7 @@ These mirror the GDD's controls table, adding Survey, Assembly, back and ghost r
 | Dash | Space | RB | DASH, or a flick on the right half |
 | Overclock | F | RT | OVERCLOCK (glows when full) |
 | Recall | Hold R | Hold LB | Hold RECALL |
-| Interact: open a cache, shop, Extract | Hold E | Hold A | Context button |
+| Interact: open a cache, shop, Clock out | Hold E | Hold A | Context button |
 | Level-up bank | Tab | Y | Level-up badge |
 | Build mode | B, then 1–6 | Hold LT for the radial | BUILD opens the bottom sheet |
 | Survey: ranges, routes, Yard | Hold V | L3 (toggle) | Automatic while the build sheet is open |
@@ -134,6 +135,7 @@ These mirror the GDD's controls table, adding Survey, Assembly, back and ghost r
 The first launch skips the Workshop and Chassis select. It goes straight into a Standard run with the default Mender Chassis, with guaranteed placements and a gentler director. The [GDD](01-gdd.md#first-time-user-experience) owns the beats and their typical timing; this section specifies their UI.
 
 **Prompts.**
+
 - At most four words plus a glyph, shown in the prompt rail or under PATCH, with a WebGPU marker on the target. On touch, the prompt rings the real on-screen button instead.
 - One prompt at a time. Each can be dismissed and clears the moment the action is done. An ignored prompt escalates once (the marker pulses, then a beacon appears) and never becomes a modal.
 - Learned beats are stored in the meta save and never prompted again. Returning players can turn hints off or reset them in settings.
@@ -189,6 +191,7 @@ Layouts: [desktop](03-art-audio.md#desktop-combat-hud) and [mobile landscape](03
 ## Level-up
 
 **Rules.**
+
 - **Banking and auto-open.** Level-ups bank ([ADR-023](../DECISIONS.md#adr-023-banked-level-ups-and-real-time-building)) and the badge counts them. The player can open the bank at any time. It also auto-opens in lulls (a setting, on by default): for example after a held assault ([director and pacing](01-gdd.md#director-and-pacing)).
 - **Offers are fixed at earn time.** Each level rolls its cards from the seed when it is earned ([random numbers](../engine/09-determinism-coop.md#random-numbers)), so reopening never rerolls and replays stay deterministic.
 - **Cards.** Each level offers three cards, or four with a Workshop unlock ([economy](01-gdd.md#economy)). A card is a new part, a part upgrade, a chip, a tower blueprint or a Forge upgrade ([parts](02-content.md#parts), [chips](02-content.md#chips), [towers](02-content.md#towers)).
@@ -258,11 +261,13 @@ flowchart LR
 ## Assembly screen
 
 The Assembly screen shows PATCH's body as its loadout ([body as loadout](01-gdd.md#body-as-loadout)).
+
 - **Inspect mode** opens with I, View or BODY.
 - **Install mode (the swap card)** opens when PATCH opens a part cache. It shows the part, the compatible hardpoints and the stat diff (DPS, range, HP, speed, tags) against the part it replaces.
 - **Layout.** The rotatable PATCH close-up sits in the centre, with callout lines to each slot. HEAD, ARM L, ARM R and BACK are on the left, with weapon stats and targeting mode. CORE, LEGS, the plating track and the six chip sockets are on the right. The compare and fusion panels run along the bottom.
 
 **Rules.**
+
 - **Install.** Confirming salvages the old part automatically. The scrap it adds to the balance is shown before confirming.
 - **Targeting modes.** Each hardpoint's mode is set here: Nearest, Strongest, First, Chain (Arc parts only) or Cursor.
 - **Salvage** needs a hold. It is disabled on CORE and LEGS, which can only be swapped, so PATCH never strips itself back to a husk.
@@ -326,13 +331,15 @@ The fabricator is the Forge's shop ([economy](01-gdd.md#economy)).
 ## Results
 
 **Entry.** A run ends in one of four ways ([core loop](01-gdd.md#core-loop)):
+
 - **Scrapped:** PATCH hits 0 HP with no reboot charge.
 - **Forge lost.**
-- **Extract:** after the Warden Titan falls, a held interact at the Forge ends the run with full rewards. Staying means overtime.
+- **Clock out:** after the Warden Titan falls, a held interact at the Forge ends the run with full rewards. Staying means overtime.
 - **Abandon,** from the pause menu.
 
 **Layout, top to bottom:**
-1. **Outcome banner:** Cleared (extracted, or scrapped in overtime), Scrapped, Forge lost or Abandoned, plus the district, mode, time and seed.
+
+1. **Outcome banner:** Cleared (clocked out, or scrapped in overtime), Scrapped, Forge lost or Abandoned, plus the district, mode, time and seed.
 2. **Sparks earned:** an itemised count-up. Menus may animate freely.
 3. **Unlocks:** revealed one at a time; skippable.
 4. **Final build:** the close-up and the part list.
@@ -377,6 +384,7 @@ The fabricator is the Forge's shop ([economy](01-gdd.md#economy)).
 **Focus navigation model.** Spatial navigation works within focus scopes; the top-most layer traps focus, and each screen remembers its last focus. The focus ring is a 2 px Amber chamfer, static in combat. A confirms, B goes back, LB/RB switch tabs and LT/RT page. Menu pauses and View opens Assembly.
 
 **Steam Deck (1280×800, 16:10).**
+
 - The extra height gives the composition preview a full row.
 - At default zoom the internal size follows [BUDGETS](../BUDGETS.md#pixel--camera-constants) (e.g. 427×267).
 - The UI scale defaults above 100% for legibility (Deck Verified text-size criteria to verify), and touching the screen switches the glyphs to touch.
