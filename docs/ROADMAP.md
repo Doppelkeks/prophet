@@ -148,7 +148,7 @@ flowchart LR
 ### M7 Steam Early Access + web demo
 
 - **Scope:**
-  - Content expansion toward 1.0: roughly 3 districts and 2 chassis.
+  - Content expansion toward 1.0: the slice plus 1–2 districts (2–3 in total) and a second Chassis ([GDD: business model](game/01-gdd.md#business-model)).
   - Steam achievements, cloud saves and Deck Verified submission.
   - A public web demo (first district) on our site and itch.io.
   - A Steam Next Fest demo.

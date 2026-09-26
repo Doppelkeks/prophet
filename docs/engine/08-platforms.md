@@ -68,13 +68,13 @@ At boot, the engine picks a **performance tier** (`high`, `std` or `mobile`; see
 
 The result is cached per device and browser version. The user can override it in settings.
 
-**Dynamic adjustment.** If frame time stays over budget for a sustained period (thermal throttling, a background app), the engine steps down through this ladder:
+**Dynamic adjustment.** If frame time stays over budget for a sustained period (thermal throttling, a background app), the engine steps down through a **render-only** ladder:
 1. Particle emission.
 2. Remesh rate.
-3. Half-rate swarm (`mobile` only).
-4. Offering the 30 fps mode.
+3. Bloom and fog quality.
+4. Offering the 30 fps mode. The sim stays at 60 Hz, so each frame runs 2 ticks.
 
-The engine never lowers simulation caps mid-run. Those only change between runs.
+Nothing in this ladder changes simulation results. Anything that would (half-rate swarm, caps, K) belongs to the run's **sim profile** ([BUDGETS](../BUDGETS.md#sim-profiles)). The sim profile is fixed at run start and only changes between runs, for example when the settings screen suggests a lighter profile after a throttled run.
 
 ---
 

@@ -181,7 +181,12 @@ prophet/
 │   ├── platform/           # web / electron / ios / android adapters (storage, lifecycle, tiers)
 │   └── app/                # bootstrap: main entry, engine-worker entry, job-worker entry
 ├── game/                   # SCRAPWAKE
-│   ├── components/  systems/  shaders/  pcg/  data/  ui/  assets/
+│   ├── components/         # component classes (static schemas)
+│   ├── systems/sim/        # deterministic simulation systems (integer-only, linted)
+│   ├── systems/view/       # render/extract-only systems (floats allowed)
+│   ├── shaders/sim/        # WGSL simulation kernels (integer-only, linted)
+│   ├── shaders/render/     # WGSL render and post shaders
+│   └── pcg/  data/  ui/  assets/
 ├── platforms/
 │   ├── electron/           # main.js, preload.js, protocol + switches, builder config, Steam shim
 │   ├── ios/                # WKWebView host + localhost server (Swift)

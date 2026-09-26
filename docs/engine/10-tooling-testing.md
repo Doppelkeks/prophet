@@ -124,12 +124,22 @@ Dev tools ship in dev builds only. They are DOM custom elements, loaded lazily w
   - On CI hardware without a GPU, only CPU-side timings and relative trends are asserted.
   - Absolute GPU budgets are asserted on the device lab and on an optional self-hosted GPU runner.
 
-**Sim-code API lint.** A small zero-dependency script scans `engine/**/sim/`, `game/systems/` and the WGSL sim kernels for banned APIs:
-- `Math.random`, `Math.sin`, `Math.cos`, `Math.pow`, `Math.sqrt`
-- `Date.now`, `performance.now`
-- float literals in `i32` WGSL kernels
+**Sim-code API lint.** A small zero-dependency script enforces the [rules for sim code](09-determinism-coop.md#rules-for-sim-code) ([ADR-012](../DECISIONS.md#adr-012-integer-deterministic-simulation)).
 
-Any hit fails CI. Violations need an explicit, reviewed `// sim-allow:` comment ([ADR-012](../DECISIONS.md#adr-012-integer-deterministic-simulation)).
+- **Scope:** only simulation code.
+  - `engine/**/sim/`
+  - `game/systems/sim/`
+  - the WGSL kernels in `game/shaders/sim/` and `engine/swarm/`
+
+  Render-only code (`game/systems/view/`, `game/shaders/render/`) may use floats and is not scanned.
+- **Banned in JS sim code:**
+  - `Math.random` and every transcendental or float helper: `sin`, `cos`, `tan`, `atan2`, `exp`, `log`, `pow`, `sqrt`, `hypot`, `cbrt`
+  - `Date.now`, `performance.now`, `crypto.getRandomValues`
+  - `Intl` and `localeCompare`
+  - `WeakRef` and `FinalizationRegistry`
+  - float typed arrays (`Float32Array`, `Float64Array`) on sim state
+- **Banned in WGSL sim kernels:** float types and literals, float atomics, and non-integer built-ins.
+- **Enforcement:** any hit fails CI. An exception needs an explicit, reviewed `// sim-allow: <reason>` comment on the line.
 
 ---
 

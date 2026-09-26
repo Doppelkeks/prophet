@@ -20,9 +20,10 @@ These terms are used across the Prophet engine docs and the SCRAPWAKE game docs.
 | **Chip** *(game)* | Passive modifier. PATCH has 6 chip slots. |
 | **Chunk, ECS** *(engine)* | Fixed-capacity SoA block of entities that share an archetype. It is the unit of parallel iteration. |
 | **Chunk, voxel** *(engine)* | A 32³ block of voxels. The unit of storage, meshing and upload. Always say which kind of chunk you mean. |
-| **Command buffer** *(engine)* | Per-thread binary log of structural ECS changes (spawn, despawn, add or remove component). It is applied at sync points. |
+| **Command buffer** *(engine)* | Per-thread binary log of deferred ECS changes (spawn, despawn, add or remove component, set a value). It is applied at sync points in a deterministic order. |
 | **Core** *(game)* | PATCH's energy slot. It powers weapons and the Overclock active ability. |
-| **Cycle** *(game)* | One run: a single procedural district, ~20 minutes, ending in a district boss or death. |
+| **Cycle** *(game)* | One run: a single procedural district, ~20 minutes. It ends when PATCH **clocks out** after the district boss (optional overtime can continue), or in defeat. |
+| **Clock out** *(game)* | Ending a Cycle voluntarily after the district boss, banking its rewards. Not to be confused with the engine's **Extract** frame phase. |
 | **Design load** | The entity count the game design uses, as opposed to the technical **ceiling**. See [BUDGETS.md](BUDGETS.md#entity-caps). |
 | **Device loss** *(engine)* | The WebGPU device disappears (backgrounding, driver reset). The engine rebuilds GPU state from the CPU copy. |
 | **Director** *(game/engine)* | System that paces spawns: minute tables plus adaptive intensity. |
@@ -53,12 +54,13 @@ These terms are used across the Prophet engine docs and the SCRAPWAKE game docs.
 | **Player field** *(engine)* | Full-map flow field whose goal is PATCH. Chasers follow it. |
 | **Power** *(game)* | A single global capacity number from the Forge and Generators. Towers consume it. |
 | **Prefab kit** *(game/engine)* | MagicaVoxel-authored modular pieces (walls, floors, roofs, signs) that the procedural generator assembles into buildings. |
-| **Readback ring** *(engine)* | A triple-buffered set of GPU→CPU staging buffers read via `mapAsync` without stalling. |
+| **Readback ring** *(engine)* | A ring of at least K + 1 GPU→CPU staging buffers, read via `mapAsync` without stalling and harvested strictly in submission order. |
 | **Recall** *(game)* | A 2 s channel that teleports PATCH to the Forge. It has a cooldown. |
 | **Render graph** *(engine)* | A per-frame declaration of GPU passes and resources, compiled into one command submission. |
 | **Scrap** *(game)* | The run currency. Collected scrap counts toward XP (the total collected) and is spent as currency (the current balance). |
 | **Seqlock** *(engine)* | Sequence-counter protocol that lets the main thread read the UI state block without tearing. |
 | **Shatter** *(game)* | At 0 HP, PATCH breaks apart and must re-collect its scattered parts within a short window. It costs a reboot charge and doubles as the co-op revive. |
+| **Sim profile** *(engine)* | The tier-dependent constants that change simulation results (K, commit lags, swarm rate, caps, district size). It is fixed per run; co-op uses the lowest common profile. See [BUDGETS.md](BUDGETS.md#sim-profiles). |
 | **Sim tick** *(engine)* | One fixed simulation step. See [BUDGETS.md](BUDGETS.md#simulation-constants). |
 | **SoA** | Structure of Arrays: one array per field. The hot data layout for ECS columns and GPU buffers. |
 | **Sparks** *(game)* | Meta currency, spent in the Workshop between runs. |

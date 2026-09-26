@@ -60,7 +60,15 @@ Rules and rationale are in [engine/09-determinism-coop.md](engine/09-determinism
 | Sim tick | **60 Hz fixed** (16.667 ms) | Rendering interpolates between ticks |
 | Swarm tick, mobile option | 30 Hz (half-rate) | Interpolated. All co-op peers must use the same rate. |
 | Max sim ticks per rendered frame | 4 | Spiral-of-death guard: past this, the game slows down instead of catching up |
-| **K** (GPU→CPU event latency) | **3 ticks** (`high`, `std`), **4 ticks** (`mobile`) | An event stamped with tick *T* is applied at tick *T+K*. If it arrives late, the sim stalls; events are never skipped. |
+| **K** (GPU→CPU event latency) | **4 ticks** (desktop profiles), **8 ticks** (`mobile` profile) | An event stamped with tick *T* is applied at tick *T+K*. If it arrives late, the sim stalls; events are never skipped. The mobile value also covers the 30 fps mode, where each frame advances 2 ticks. |
+| Readback ring depth | ≥ K + 1 slots | One slot being written plus up to K in flight ([03](engine/03-rendering.md#readback-ring)) |
+| Async commit lag, flow fields (*L_field*) | 15 ticks (250 ms) | Solve results are committed at tick *R + L*, where *R* is the request tick ([09](engine/09-determinism-coop.md#async-results-at-fixed-ticks)) |
+| Async commit lag, collapse (*L_collapse*) | 6 ticks (desktop profiles), 9 ticks (`mobile` profile) | Matches the collapse budget below |
+| Async commit lag, PCG (*L_pcg*) | Not used in v1 | Generation finishes before tick 0. Mid-run generation would need a lag defined here first. |
+| Chance format | Q16 (65,536 = 100 %) | Compared against 16 hash bits |
+| Multiplier format | Q12 (4,096 = 1.0×) | Damage, speed and cost multipliers |
+| State-hash interval | Every 60 ticks (debug/CI builds); every 300 ticks (co-op desync check) | Release single-player builds don't hash |
+| Co-op input delay *L_input* (future) | 4 ticks (LAN), 6 ticks (internet) | Lockstep only; single-player uses 0 |
 | Position unit | 1/1024 m (Q10) in `i32` | Range ±2,097 km |
 | Velocity unit | Q10 m per tick | |
 | Angle unit | 16-bit binary angle (65,536 = 360°) | |
@@ -70,6 +78,19 @@ Rules and rationale are in [engine/09-determinism-coop.md](engine/09-determinism
 | Time | Ticks as `u32` | ~828 days at 60 Hz |
 | RNG | Stateless hash of *(seed, stream, tick, id)* | See [determinism](engine/09-determinism-coop.md#random-numbers) |
 | Statuses per swarm unit | ≤ 8 | `u8` timers in 4-tick units (max 17 s) |
+| ECS chunk size | 16 KiB (rows per chunk depend on the archetype's row size) | Final value is chosen in M5 with real archetypes |
+| Density/threat map cell | 8 m, one cell per voxel-chunk column: 32 × 32 (desktop), 16 × 16 (mobile) | Director, camera and audio inputs |
+
+### Sim profiles
+
+A tier's **sim profile** is the set of its constants that change simulation results:
+- *K* and the async commit lags
+- swarm tick rate
+- entity caps and ECS capacity
+- district size
+- the fodder density factor *ρ* ([GDD: tier density](game/01-gdd.md#tier-density))
+
+The sim profile is fixed when a run starts and is recorded in replays and checkpoints. The performance tier chooses it in single-player; a co-op session runs the **lowest common profile** of its peers ([09](engine/09-determinism-coop.md#co-op-model)). A mid-run change is never allowed to alter the sim profile. The dynamic step-down in [08](engine/08-platforms.md#tier-detection) only touches rendering.
 
 ---
 
@@ -226,7 +247,8 @@ No single binding may exceed **128 MB**. That is the WebGPU default `maxStorageB
 
 | Item | Target | Validated in |
 |---|---|---|
-| GPU readback p95 | ≤ 3 frames desktop, ≤ 4 frames mobile | M1 |
+| GPU readback latency p95 (submit → harvestable) | ≤ 3 frames desktop, ≤ 4 frames mobile (at 60 fps) | M1 |
+| GPU readback latency p99, in ticks, at the profile's lowest frame rate | ≤ K − 1 ticks ([K](#simulation-constants)); otherwise stalls become visible and K must grow | M1, M2 |
 | Input to photon | ≤ 50 ms desktop (Electron/Chrome at 60 Hz), ≤ 70 ms mobile | M5 |
 | HUD state-block refresh | 30 Hz. One-off events go immediately via `postMessage`. | M5 |
 
