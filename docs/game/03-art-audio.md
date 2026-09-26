@@ -24,7 +24,7 @@ The art bible and audio direction for SCRAPWAKE: palette, scale, lighting, chara
 
 | Token | Hex | CSS variable | Role |
 |---|---|---|---|
-| Night 900 | `#070B16` | `--c-night-900` | Sky, deepest shadow, outlines, HUD panel base |
+| Night 900 | `#070B16` | `--c-night-900` | Sky, deepest shadow, Sweep outlines, HUD panel base |
 | Night 800 | `#0B1224` | `--c-night-800` | Shadow band, menu panel fill |
 | Night 700 | `#13203B` | `--c-night-700` | Upper fog, far silhouettes, raised panels |
 | Steel 700 | `#22385A` | `--c-steel-700` | Cold metal in shade, Sweep shells in shadow, dividers |
@@ -82,11 +82,18 @@ The canonical file is `game/ui/palette.css` (proposed). The DOM UI imports it ([
 | Family | Tokens | Means | Rules |
 |---|---|---|---|
 | **Player** | Sodium, Amber | PATCH, player structures and drones, friendly fire, scrap, player UI | PATCH's optic is the brightest orange cluster on screen. PATCH uses Sodium; towers and drones use Amber. |
-| **Halcyon** | Cyan, Electric blue, Holo white | The Sweep, corp signage and broadcasts, enemy fire | Enemy projectiles are cyan with a Holo white core, never orange |
+| **Halcyon** | Cyan, Electric blue, Holo white | The Sweep, corp signage and broadcasts, enemy fire | Sweep projectiles are cyan/white diamonds; player projectiles are round and orange ([accessibility](01-gdd.md#accessibility)) |
 | **Anomalous** | Magenta | Anomalous rarity, anomaly zones and events | Nothing else uses magenta, not even signage |
 | **Critical danger** | Ember + Holo white hatch | Lethal telegraphs, primed mines, Forge critical, the Shatter countdown | Always shape (hatch, chevrons, icon) **and** motion (pulse), never a flat fill: orange vs red fails for deuteranopes |
 | **Environment** | Night, Steel, Concrete, Rust | The city | Environment neon sits above head height, reads as text or logos, and is dimmer than gameplay emissives |
 | **Neutral UI** | Bone, Concrete 400 | Text | Bone is the only warm white |
+
+**Outlines** apply to actors only ([outlines](../engine/04-pixel-art-pipeline.md#outlines)):
+- PATCH, towers and drones: Sodium, so team colour survives any lighting.
+- Sweep specialists and bosses: Night 900.
+- Elites: Holo white, with a marching dash.
+
+The high-contrast option adds a Holo white rim to every Sweep unit ([accessibility](01-gdd.md#accessibility)).
 
 ### Rarity colours
 
@@ -114,7 +121,7 @@ The table shows ΔE00 between key pairs, for normal vision and full-severity sim
 | Magenta vs Ember (anomalous vs danger) | 27 | 37 | 19 | 7 | **Unsafe for tritans.** Anomalous always carries the broken frame and glitch pattern |
 | Magenta vs Sodium (anomalous vs you) | 38 | 42 | 22 | 8 | Same mitigation |
 | Cyan vs Magenta (Halcyon vs anomalous) | 81 | 33 | 32 | 76 | Safe; the lightness gap carries it |
-| Amber vs Cyan (scrap vs enemy fire) | 48 | 44 | 49 | 56 | Hue-safe, but near-equal lightness under deutan and in greyscale. Shape decides: gems are glinting diamonds, enemy shots are elongated bolts |
+| Amber vs Cyan (scrap vs enemy fire) | 48 | 44 | 49 | 56 | Hue-safe, but near-equal lightness under deutan and in greyscale. Shape decides: scrap is nut-and-cog chunks with a glint, Sweep shots are diamonds, player shots are round |
 | Cyan vs Holo white | 15 | 9 | 13 | 13 | Within one family only; never carries a decision |
 
 Text contrast is given as a WCAG 2.x ratio, on Night 900 / on the worst-case combat panel (85% Night 900 over a Holo white flash):
@@ -220,12 +227,15 @@ Actors never shade below a minimum light level, so PATCH and the Sweep read even
 - **Dangling cables.** One to three loose cables hang from sockets on springs. They are cheap to render and make PATCH feel alive and improvised.
 - **Blue creeps in.** Halcyon parts keep their blue, so a late-run PATCH visibly carries stolen corp tech. Orange stays dominant: every stolen part gets a hand-painted orange claim slash, and cyan stays under ~40% of PATCH's emissive pixels.
 - **Plating** is bolted on inside the silhouette: bare frame, then patched plates, then full plating with amber hazard trim.
-- **Chassis looks** ([meta progression](01-gdd.md#meta-progression)) change paint and starting parts, never the body: Mender (welding arm, amber cross decals), Bulwark (wide stance, riot plate), Skitter (light frame, antenna whips), Wrecker (hazard stripes, demolition fist).
+- **Chassis looks** ([meta progression](01-gdd.md#meta-progression)) change paint and starting parts, never the body:
+  - Mender, the default: welding torch, amber cross decals.
+  - Bulwark: wide stance, riot plate, a turret pack on the back.
+  - Skitter: light frame, sprinter legs, antenna whips.
+  - Wrecker: hazard stripes, drill fist.
 - **Visible progression**, from husk to full body:
-  - **Husk:** torso and optic dragged by stub arms, at run start and after a Shatter.
-  - **Walker:** stands on legs from the guaranteed cache ([FTUE](01-gdd.md#first-time-user-experience)).
-  - **Armed:** first weapon.
-  - **Built:** all four hardpoints filled and plating visible.
+  - **Husk:** torso, optic and one arm weapon, dragging itself along. This is the start of every run (except for Skitter) and the state after a Shatter.
+  - **Walker:** stands up on legs from the guaranteed cache ([FTUE](01-gdd.md#first-time-user-experience)).
+  - **Built:** all four hardpoints filled, plating visible.
   - **Evolved:** fusion parts with unique silhouettes ([fusions](02-content.md#fusions)).
 
 ### The Sweep
@@ -246,7 +256,7 @@ Halcyon's machines are PATCH's opposite: sleek, uniform, sterile. Their white sh
 | Leeches | Specialist | Small pod with a tether cable | Dart and latch | Tether line to the victim |
 | Jammers | Specialist | Dish on legs | Plant and broadcast | Glitch ring; jammed towers show static |
 
-- **Elites** get a Holo white [outline](../engine/04-pixel-art-pipeline.md#outlines) with a marching dash pattern (one pattern per modifier) and a modifier glyph above the unit ([enemies](02-content.md#enemies)). A modifier that is lethal on death uses the Ember critical treatment. See the [open questions](#open-questions) on outlines for swarm units.
+- **Elites** are always actors, including promoted fodder ([enemies](01-gdd.md#enemies)), so they can carry the ID-buffer outline. It is Holo white with a marching dash pattern, one pattern per modifier, plus a modifier glyph above the unit ([enemies](02-content.md#enemies)). A modifier that is lethal on death uses the Ember critical treatment.
 - **Telegraphs** have two levels: a cyan hatch means "dangerous, avoid it"; an Ember hatch with a fast pulse means "lethal". The hatch fills toward the moment of impact.
 - **Bosses** ([bosses](02-content.md#bosses)) each own one iconic shape and one readable weak point: their brightest cyan light, ringed by a pulsing outline. The shapes are a wrecking-crane walker with a demolition ball, built to show off collapses (Demolisher); a riot warden with shield wings and a floodlight head (Warden Titan); a carrier mothership leaking Mites (Hive Queen); and a floating core in holographic rings (Sweep Nexus).
 
@@ -263,7 +273,7 @@ Towers are salvage-built from the same scrap as PATCH: rust, concrete and welded
 | EMP Spire | Antenna spire with a halo | Periodic pulse ring |
 | Scrap Wall | Voxel wall segments with amber hazard trim | Footprint only |
 
-1.0 towers follow the same grammar. Ranges are [world-space UI](../engine/03-rendering.md#world-space-ui): a 1 px Amber edge over a dithered fill. They show in build mode, on hover or selection, and while Survey is held ([build mode](04-ux-flows.md#build-mode)).
+1.0 towers follow the same grammar. Ranges are [world-space UI](../engine/03-rendering.md#world-space-ui): a 1 px Amber edge over a dithered fill. They show in build mode, on hover or selection, and while Survey is on ([build mode](04-ux-flows.md#build-mode)).
 
 ### Animation rules
 
@@ -337,13 +347,13 @@ These layouts are indicative. Behaviour, update rates and per-device input are i
 
 ### Desktop combat HUD
 
-Vitals sit top-left, the clock and assault top-centre, and economy and minimap top-right. The Forge sits bottom-left, hardpoints bottom-centre and actions bottom-right. The centre stays clear for PATCH.
+Vitals sit top-left, the clock and assault top-centre, and economy and minimap top-right. The level ring, drawn as `(( ))`, wraps the scrap balance. The Forge sits bottom-left, hardpoints bottom-centre and actions bottom-right. The centre stays clear for PATCH.
 
 ```text
 +------------------------------------------------------------------------------------------+
 | +--------------------------------+ +------------------------+ +------------------------+ |
-| | (O) HP  [##########----] 142   | |        12:34           | | SCRAP 1,240  [TAB] +2  | |
-| |     PLT [#][#][#][ ][ ]        | | ASSAULT 2 IN 0:42      | | LV 14 [########------] | |
+| | (O) HP  [##########----] 142   | |        12:34           | | LV 14  (( 1,240 ))     | |
+| |     PLT [#][#][#][ ][ ]        | | ASSAULT 2 IN 0:42      | | [TAB] LEVEL UP +2      | |
 | |     EN  [#######-----] OC RDY  | | [Mite 60][Wasp 12]     | +------------------------+ |
 | |     REBOOTS <> <>              | | [PRIME 1][ELITE 2]     |             +------------+ |
 | +--------------------------------+ +------------------------+             | MINIMAP    | |
@@ -352,10 +362,10 @@ Vitals sit top-left, the clock and assault top-centre, and economy and minimap t
 |                                                                           +------------+ |
 |             world: PATCH, swarm, towers, ghosts, ranges, health bars,                    |
 |             damage numbers - all world-space UI is drawn in WebGPU                       |
-|                     > [E] OPEN CACHE       [SIREN] assault in 30 s <                     |
+|                 > hold [E] OPEN CACHE      [SIREN] assault in 30 s <                     |
 | +--------------------------+ +----------------------------+ +--------------------------+ |
 | | FORGE [########----]     | | HEAD ARM-L ARM-R BACK      | | [SPACE] DASH x2          | |
-| | SHIELD UP                | | [ok] [ok]  [JAM] [--]      | | [Q] OVERCLOCK [F] RECALL | |
+| | SHIELD READY             | | [ok] [ok]  [JAM] [--]      | | [F] OVERCLOCK [R] RECALL | |
 | | POWER 14/20              | | CORE [OC 60%]  LEGS [2]    | | [B] BUILD     [I] BODY   | |
 | +--------------------------+ +----------------------------+ +--------------------------+ |
 +------------------------------------------------------------------------------------------+
@@ -367,8 +377,8 @@ Stick zone bottom-left, button arc bottom-right, read-only info along the top. N
 
 ```text
 +------------------------------------------------------------------------------------------+
-|// (O) HP [#######---]           12:34   ASSAULT 0:42        SCRAP 1,240    [ || ]      //|
-|//     EN [#####-----]           [Mite][Wasp][PRIME]         LV 14 [####--]             //|
+|// (O) HP [#######---]           12:34   ASSAULT 0:42        LV 14 ((1,240))  [ || ]    //|
+|//     EN [#####-----]           [Mite][Wasp][PRIME]                                    //|
 |// FORGE [######--] UP                                                                  //|
 |//                                                                    [ LVL +2 ]        //|
 |// // = env(safe-area-inset-left/right)                                                 //|
@@ -419,16 +429,16 @@ DESKTOP BUILD BAR (bottom centre; the world keeps running)
 | |S:nnn    | |S:nnn    | |S:nnn    | |S:nnn    | |S:nnn    | |S:nn/2m  | range: chain    |
 | |P:n      | |P:n      | |P:n      | |P:n      | |P:n      | |P:n      | Mk I > II > III |
 | +---------+ +---------+ +---------+ +---------+ +---------+ +---------+                 |
-| [LMB] place  [drag] wall line  [R] rotate  [SHIFT] keep placing  [RMB] cancel           |
+| [LMB] place  [drag] wall line  [Q] rotate  [SHIFT] keep placing  [RMB] cancel           |
 +-----------------------------------------------------------------------------------------+
 
-GAMEPAD RADIAL (hold LB, aim with RS, release to pick; release centred = cancel)
+GAMEPAD RADIAL (hold LT, aim with RS, release to pick; release centred = cancel)
                               [ARC PYLON]
                   [RIVET]                     [FLAME]
               [WALL] ---- (  S:nnn  P:n  ) ---- [MORTAR]
                 [UPGRADE]                     [EMP]
                               [REPAIR]
-snap-cursor: [RS] steps tile by tile, [A] place, [X] rotate, [B] cancel
+snap-cursor: [RS] steps tile by tile, [A] place, [X] wall line, [R3] rotate, [B] cancel
 ```
 
 ## Audio direction
@@ -494,7 +504,7 @@ Per-type voice caps are in [BUDGETS: audio constants](../BUDGETS.md#audio-consta
 
 ### Voice and mix
 
-**PATCH speaks only in bleeps.** A small sampler of synth bleeps carries mood through pitch contour: rising means curious, falling means hurt, fast chirps mean alarmed. Captions show intent, e.g. "PATCH: [alarmed bleeps]".
+**PATCH speaks only in bleeps.** A small sampler of synth bleeps carries mood through pitch contour: rising means curious, falling means hurt, fast chirps mean alarmed. Captions show intent, e.g. "PATCH: [alarmed bleeps]". Alternative bleep voice sets are 1.0 cosmetics.
 
 **The corporate announcer**, "Halcyon Public Safety", is calm, polite and synthetic. It delivers assault warnings, district greetings, boss intros and cheerful threats.
 
@@ -555,7 +565,6 @@ These are notes for artists. The tooling is in [asset pipeline](../engine/10-too
 ## Open questions
 
 - **Ember does double duty.** The plan's palette has no dedicated red, so Ember covers both critical danger and Military rarity. This doc limits Military to static UI frames and loot beams. A separate alarm token would be cleaner; decide in M4 look-dev.
-- **Elite outlines vs "no outline on fodder".** [BUDGETS](../BUDGETS.md#pixel--camera-constants) gives fodder no outline, yet elites are marked by one. Either elite swarm units write the object-ID buffer, or elites are always actors ([outlines](../engine/04-pixel-art-pipeline.md#outlines)).
 - **Pixel font.** Should we draw our own Latin font or adopt an OFL one? Which licensed bitmap font covers CJK?
 - **Announcer.** Licensed TTS or a processed human VO actor? Which languages beyond English get voiced?
 - **Rain on `mobile`.** Does wet shading fit the post-processing budget ([BUDGETS: GPU frame budgets](../BUDGETS.md#gpu-frame-budgets))?

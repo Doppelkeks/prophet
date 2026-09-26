@@ -24,6 +24,8 @@ These terms are used across the Prophet engine docs and the SCRAPWAKE game docs.
 | **Core** *(game)* | PATCH's energy slot. It powers weapons and the Overclock active ability. |
 | **Cycle** *(game)* | One run: a single procedural district, ~20 minutes. It ends when PATCH **clocks out** after the district boss (optional overtime can continue), or in defeat. |
 | **Clock out** *(game)* | Ending a Cycle voluntarily after the district boss, banking its rewards. Not to be confused with the engine's **Extract** frame phase. |
+| **Debris body** *(engine)* | A falling chunk of a collapsed structure. It is simulated deterministically on the CPU as a kinematic body, deals crush damage and places rubble voxels. See [06: debris](engine/06-world.md#debris). |
+| **Debris voxel particle** *(engine)* | A cosmetic GPU particle that a debris body shatters into on impact. |
 | **Design load** | The entity count the game design uses, as opposed to the technical **ceiling**. See [BUDGETS.md](BUDGETS.md#entity-caps). |
 | **Device loss** *(engine)* | The WebGPU device disappears (backgrounding, driver reset). The engine rebuilds GPU state from the CPU copy. |
 | **Director** *(game/engine)* | System that paces spawns: minute tables plus adaptive intensity. |
@@ -68,7 +70,7 @@ These terms are used across the Prophet engine docs and the SCRAPWAKE game docs.
 | **State block** *(engine)* | Fixed-layout shared-memory struct the engine writes and the DOM UI reads (HP, scrap, timers…). |
 | **Structural graph** *(engine)* | Per-building graph of load-bearing elements (pillars, slabs, walls). Collapse is evaluated on the graph, not by flood-filling voxels. |
 | **Sweep, the** *(game)* | Halcyon's automated "Clean Sweep" forces: every enemy in the game. |
-| **Swarm unit** *(engine)* | An entity that lives in the GPU swarm: fodder, projectiles, pickups, particles, debris. |
+| **Swarm unit** *(engine)* | A deterministic entity in the GPU swarm: fodder, projectiles, pickups. GPU particles and debris voxel particles share the GPU but are cosmetic (floats allowed, excluded from determinism). |
 | **Threading tier** *(engine)* | `shared` (SharedArrayBuffer job system), `transfer` (transferable buffers, coarse jobs only) or `inline` (single thread, tests only). |
 | **TWA** | Trusted Web Activity: an Android app that runs our web build in Chrome. |
 | **Vertical slice** | The first shippable-quality slice of the game. See [VERTICAL-SLICE.md](VERTICAL-SLICE.md). |

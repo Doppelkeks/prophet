@@ -125,7 +125,7 @@ sequenceDiagram
     E->>E: apply command buffers, queue GPU tick commands
   end
   E->>G: uploads, swarm passes per tick, render graph, one submit
-  G-->>E: readback slot mapped 1-3 frames later
+  G-->>E: readback slot mapped a few frames later
   E->>M: write state block (seqlock), push audio events
   E->>J: kick async jobs (PCG, fields, meshing), help drain
 ```
@@ -143,13 +143,14 @@ sequenceDiagram
    1. uploads
    2. swarm passes for each simulated tick
    3. culling
-   4. shadow map
-   5. scene
-   6. particles
-   7. post-processing
-   8. upscale
-   9. world-space UI
-   10. copies into the readback slot
+   4. light binning
+   5. shadow map
+   6. scene
+   7. particles
+   8. post-processing
+   9. upscale
+   10. world-space UI
+   11. copies into the readback slot, one block per simulated tick
 
    Then one `queue.submit`, followed by `mapAsync` on the slot.
 7. **Background.** Kick async jobs, help drain the job queue until the frame budget is spent, then yield.

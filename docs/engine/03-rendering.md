@@ -320,10 +320,10 @@ World-anchored UI is drawn in WebGPU, never in the DOM ([ADR-006](../DECISIONS.m
 
 ## Readback ring
 
-The GPU → CPU half of the [CPU-GPU contract](05-gpu-swarm.md#cpu-gpu-contract) travels through a ring of `MAP_READ` staging buffers. Each **slot** holds what the ticks simulated in one frame produced: the **counters block** (exact kills, scrap and other GPU-side counters), one tick-stamped **event buffer** per tick, the latest low-resolution **density and threat maps** (for the director, camera and audio), and timestamp results when available.
+The GPU → CPU half of the [CPU-GPU contract](05-gpu-swarm.md#cpu-gpu-contract) travels through a ring of `MAP_READ` staging buffers. Each **slot** holds the outbound blocks of the ticks simulated in one frame, **one block per tick**. Blocks are never merged per frame, because how many ticks a frame covers differs between machines, and merging would break determinism. Each tick's block carries the tick's **counters** (exact kills, scrap and other GPU-side counters), its tick-stamped **event buffer**, and the low-resolution **density and threat maps** the director reads. The slot also carries timestamp results when available.
 
-- **Depth ≥ K + 1 slots**, with K per tier from [BUDGETS](../BUDGETS.md#simulation-constants): one slot being written plus up to K in flight (e.g. K = 3 needs at least 4 slots).
-- **Size:** the events-per-tick cap × the max ticks per frame, plus counters and maps. The whole ring fits the readback budget in [BUDGETS](../BUDGETS.md#gpu-memory).
+- **Depth ≥ K + 1 slots**, with K per tier from [BUDGETS](../BUDGETS.md#simulation-constants): one slot being written plus up to K in flight (e.g. K = 4 needs at least 5 slots).
+- **Size:** one per-tick block (the events-per-tick cap, counters and maps) × the max ticks per frame. The whole ring fits the readback budget in [BUDGETS](../BUDGETS.md#gpu-memory).
 - **Write:** the frame's encoder ends with `copyBufferToBuffer` into the slot. After `queue.submit` the engine calls `mapAsync` and **never awaits it on the frame path**; resolution only flips a flag. A frame that simulates no tick copies nothing.
 - **Harvest:** at the start of a later frame, mapped slots are copied **strictly in submission order** into heap event queues keyed by tick, then unmapped.
 - **Late:** if the slot carrying tick *T* is not harvested when the simulation reaches *T + K*, or no slot is free, the simulation stalls. That policy belongs to [05-gpu-swarm](05-gpu-swarm.md#k-latency-and-stalls). Latency target: [BUDGETS](../BUDGETS.md#latency-targets).
@@ -380,7 +380,7 @@ The `mapAsync` promise and the `getMappedRange()` buffer are the only per-frame 
 5. **Re-upload** static resources (atlases, LUT, fonts, geometry pages) from the asset cache.
 6. **Remesh** every non-empty chunk from the CPU voxel authority, visible chunks first ([06](06-world.md#voxel-storage)). Re-upload the world height and occupancy mirrors and the flow fields.
 7. **Actors** come back with the next extract.
-8. **Swarm:** fodder, projectiles and particles are gone, and the director respawns fodder at the spawn edges ([ADR-019](../DECISIONS.md#adr-019-fodder-is-not-saved)). Uncollected pickups are not lost: the last harvested counters block carries their total value, which is respawned as merged gems near PATCH (to confirm with [05](05-gpu-swarm.md#overflow-policy)).
+8. **Swarm:** fodder, projectiles and particles are gone, and the director respawns fodder at the spawn edges ([ADR-019](../DECISIONS.md#adr-019-fodder-is-not-saved)). Uncollected pickups are not lost: their total value is known exactly from the counters, and it is respawned as merged gems near PATCH ([05: resets and device loss](05-gpu-swarm.md#resets-and-device-loss)).
 9. **Resume** once the visible chunks are meshed.
 
 **iOS backgrounding.** WebKit may drop the device while the app is in the background (to verify in M1). The host forwards lifecycle events ([08](08-platforms.md#ios)); the engine pauses, stops submitting, and treats a loss on return as expected. The in-app localhost server restarts on foreground ([ADR-005](../DECISIONS.md#adr-005-mobile-shells)).

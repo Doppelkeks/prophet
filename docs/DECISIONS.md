@@ -232,7 +232,7 @@ Details: [engine/01-overview.md](engine/01-overview.md#runtime-topology).
 
 **Decision:**
 - **CPU actors (ECS):** PATCH, towers, specialists, bosses, caches, the Forge, the director.
-- **GPU swarm:** fodder, projectiles, pickups, particles, debris.
+- **GPU swarm:** fodder, projectiles and pickups, all deterministic. Cosmetic GPU particles and debris voxel particles run alongside, excluded from determinism.
 - **Contract:** the **CPU decides *when/what*; the GPU decides *who/where*.**
 - **CPU → GPU, each tick:**
   - spawns
@@ -344,7 +344,7 @@ Values: [BUDGETS.md](BUDGETS.md#world-constants).
 
 Values: [BUDGETS.md](BUDGETS.md#world-constants). Details: [engine/06-world.md](engine/06-world.md#navigation).
 
-**Consequences:** Ground units get no multi-storey interiors. Flyers ignore walls, and blend steering with the fields.
+**Consequences:** Ground units get no multi-storey interiors. Flyers ignore walls and steer directly, optionally blended with the fields.
 
 ## ADR-018: Pixel-exact projection
 
@@ -358,7 +358,7 @@ Values: [BUDGETS.md](BUDGETS.md#world-constants). Details: [engine/06-world.md](
 
 Values: [BUDGETS.md](BUDGETS.md#pixel--camera-constants).
 
-**Alternative:** orthographic projection at 40–50° pitch, with texel snapping. At a 30° pitch, character voxels project to non-integer pixel sizes and "boil" as they rotate.
+**Alternative:** orthographic projection at 40–50° pitch, with texel snapping. Snapping fixes shimmer while panning, but projected voxel heights stay non-integer (about 0.64–0.77 px per character voxel), so rows come out uneven and characters "boil" as they rotate. A 30° pitch is worse on both counts and also hides 1.73× a building's height of ground. The comparison table is in [04](engine/04-pixel-art-pipeline.md#projection).
 
 **Consequences:** The camera is not free-orbit, except in an optional photo mode that accepts crawl.
 
