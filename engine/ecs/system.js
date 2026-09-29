@@ -51,6 +51,13 @@ export class System {
   /** @type {'auto' | 'serial' | 'chunks'} */
   static parallel = 'auto';
 
+  constructor() {
+    /** @type {EcsContext} set by init() before the first run */
+    this.ecs = /** @type {any} */ (null);
+    /** @type {import('../core/heap.js').Heap} */
+    this.heap = /** @type {any} */ (null);
+  }
+
   /** @param {EcsContext} ecs */
   init(ecs) {
     this.ecs = ecs;

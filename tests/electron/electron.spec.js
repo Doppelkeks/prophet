@@ -39,6 +39,11 @@ test('Electron shell: app:// origin, cross-origin isolated, WebGPU adapter, fram
       };
     });
     expect(headers).toEqual({ coop: 'same-origin', coep: 'require-corp', corp: 'same-origin' });
+    // Input reaches the simulation and the HUD state comes back: hold D until PATCH moved 1 m east.
+    await win.waitForFunction(() => !!window.__px?.hud);
+    await win.keyboard.down('KeyD');
+    await win.waitForFunction(() => (window.__px?.hud?.patchX ?? 0) > 1024, null, { timeout: 10_000 });
+    await win.keyboard.up('KeyD');
   } finally {
     await app.close();
   }

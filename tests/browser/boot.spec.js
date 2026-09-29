@@ -20,7 +20,35 @@ async function boot(page, url) {
   return { px, errors };
 }
 
-test('boots in the shared tier with WebGPU inside the engine worker', async ({ page }) => {
+/**
+ * Holds keys, then waits until PATCH moved at least 1 m the right way (Q10 units in the HUD state).
+ * @param {import('@playwright/test').Page} page
+ * @param {string[]} keys
+ * @param {number} sx expected sign of the x movement
+ * @param {number} sy expected sign of the y movement
+ */
+async function drive(page, keys, sx, sy) {
+  await page.waitForFunction(() => !!window.__px?.hud);
+  const before = /** @type {Record<string, number>} */ (await page.evaluate(() => window.__px?.hud));
+  for (const k of keys) await page.keyboard.down(k);
+  await page.waitForFunction(
+    ([x0, y0, sx, sy]) => {
+      const h = window.__px?.hud;
+      if (!h) return false;
+      const okX = sx === 0 ? h.patchX === x0 : (h.patchX - x0) * sx > 1024;
+      const okY = sy === 0 ? h.patchY === y0 : (h.patchY - y0) * sy > 1024;
+      return okX && okY;
+    },
+    [before.patchX, before.patchY, sx, sy],
+    { timeout: 10_000 },
+  );
+  for (const k of keys) await page.keyboard.up(k);
+  const after = /** @type {Record<string, number>} */ (await page.evaluate(() => window.__px?.hud));
+  expect(after.tick).toBeGreaterThan(before.tick);
+  expect(after.entities).toBe(1);
+}
+
+test('boots in the shared tier with WebGPU inside the engine worker; PATCH moves', async ({ page }) => {
   const { px, errors } = await boot(page, '/index.html');
   expect(px?.error ?? null).toBeNull();
   expect(px?.status).toBe('ok');
@@ -28,22 +56,36 @@ test('boots in the shared tier with WebGPU inside the engine worker', async ({ p
   expect(px?.probes.coi).toBe(true);
   expect(px?.threading).toBe('shared');
   expect(px?.engine?.adapter).toBeTruthy();
+  expect(px?.engine?.jobWorkers).toBeGreaterThan(0);
   expect(px?.frames).toBeGreaterThan(2);
+  await drive(page, ['KeyD'], 1, 0);
+  await drive(page, ['ArrowUp', 'KeyA'], -1, 1);
+  await expect(page.locator('px-hud')).toContainText('PATCH');
+  const bridge = await page.evaluate(() => window.__px?.bridge);
+  expect(bridge?.dropped).toBe(0);
   expect(errors).toEqual([]);
 });
 
-test('boots with the message-ping frame driver', async ({ page }) => {
-  const { px, errors } = await boot(page, '/index.html?driver=ping');
-  expect(px?.status).toBe('ok');
-  expect(px?.engine?.driver).toBe('message-ping');
-  expect(px?.frames).toBeGreaterThan(2);
-  expect(errors).toEqual([]);
-});
+for (const [driver, mode] of [
+  ['ping', 'message-ping'],
+  ['atomics', 'atomics-ping'],
+  ['raf', 'worker-raf'],
+]) {
+  test(`runs with the ${mode} frame driver`, async ({ page }) => {
+    const { px, errors } = await boot(page, `/index.html?driver=${driver}`);
+    expect(px?.status).toBe('ok');
+    expect(px?.engine?.driver).toBe(mode);
+    expect(px?.frames).toBeGreaterThan(2);
+    await drive(page, ['KeyS'], 0, -1);
+    expect(errors).toEqual([]);
+  });
+}
 
-test('falls back to the transfer tier without cross-origin isolation', async ({ page }) => {
+test('falls back to the transfer tier without cross-origin isolation; input and state go by message', async ({ page }) => {
   const { px, errors } = await boot(page, `http://127.0.0.1:${PORTS.noCoi}/index.html`);
   expect(px?.probes.coi).toBe(false);
   expect(px?.threading).toBe('transfer');
   expect(px?.status).toBe('ok');
+  await drive(page, ['KeyD', 'KeyW'], 1, 1);
   expect(errors).toEqual([]);
 });
