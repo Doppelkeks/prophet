@@ -127,7 +127,10 @@ npm run replay -- f.json  # replay an exported run in Node on the JS reference s
   - `?units=&shots=&pickups=` override the swarm pools.
   - `?swarm=cpu` runs the JS reference swarm.
   - `?threading=`, `?driver=`, `?perf=` force a tier.
+  - `?timing=pass` splits the swarm's GPU timings per step (`window.__px.perf`); `?timing=off` turns them off.
 - `window.__px.exportReplay()` returns the run so far; `npm run replay` checks that it replays identically.
+
+**The swarm stress scene:** `/tools/stress/?units=100000&shots=50000&ticks=600` on the dev server. It reports GPU ms per tick, readback latency, pool fill and event overflow ([BUDGETS](docs/BUDGETS.md#stress-ceiling-scene-m2-exit)).
 
 Working rules for contributors (and coding agents) are in [CLAUDE.md](CLAUDE.md).
 
@@ -137,7 +140,7 @@ Working rules for contributors (and coding agents) are in [CLAUDE.md](CLAUDE.md)
 engine/     Prophet: pure JS, zero runtime dependencies
 game/       SCRAPWAKE: entry points, components, systems, shaders, UI, data
 platforms/  electron/
-tools/      dev server, sim lint, production build, replay, generators (asset cooker to come)
+tools/      dev server, sim lint, production build, replay, the swarm stress page, generators (asset cooker to come)
 tests/      unit (node:test) · browser (Playwright + WebGPU) · electron
 docs/       the concept and the specs
 ```

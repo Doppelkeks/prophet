@@ -3,6 +3,7 @@
 // outbound blocks into. Slots are mapped after submit and harvested strictly in submission order, so
 // block T never overtakes block T − 1. It needs at least K + 1 slots: one being written plus up to K
 // in flight. Latency from submit to harvest is sampled for the readback budget.
+import { Samples } from './gpu-timer.js';
 
 /** @typedef {{ buffer: GPUBuffer, state: 'free' | 'encoding' | 'mapping' | 'ready', ticks: number[], submittedAt: number, seq: number }} ReadbackSlot */
 
@@ -25,8 +26,8 @@ export class ReadbackRing {
     this.seq = 0;
     /** Frames that found no free slot. */
     this.starved = 0;
-    this.samples = new Float64Array(128);
-    this.sampleCount = 0;
+    /** Submit → harvest latencies, in ms. */
+    this.latency = new Samples(128);
     this.lost = false;
     this.lostReason = '';
   }
@@ -89,7 +90,7 @@ export class ReadbackRing {
       fn(slot, data);
       slot.buffer.unmap();
       slot.state = 'free';
-      this.samples[this.sampleCount++ % this.samples.length] = performance.now() - slot.submittedAt;
+      this.latency.push(performance.now() - slot.submittedAt);
       n++;
     }
     return n;
@@ -97,10 +98,7 @@ export class ReadbackRing {
 
   /** 95th percentile of the recent submit → harvest latencies, in ms. */
   p95() {
-    const n = Math.min(this.sampleCount, this.samples.length);
-    if (!n) return 0;
-    const sorted = Array.from(this.samples.subarray(0, n)).sort((a, b) => a - b);
-    return sorted[Math.min(n - 1, Math.floor(n * 0.95))];
+    return this.latency.percentile(0.95);
   }
 
   destroy() {

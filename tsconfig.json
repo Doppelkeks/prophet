@@ -13,5 +13,5 @@
     "noFallthroughCasesInSwitch": true,
     "resolveJsonModule": true
   },
-  "include": ["engine/**/*.js", "game/**/*.js", "types/**/*.d.ts"]
+  "include": ["engine/**/*.js", "game/**/*.js", "tools/stress/**/*.js", "types/**/*.d.ts"]
 }

@@ -148,7 +148,8 @@ function compare(g, r, layout) {
 const refState = (ref) => ({ U: ref.b.Ui.slice(), P: ref.b.Pi.slice(), A: ref.b.A.slice(), O: ref.b.O.slice() });
 
 /**
- * @param {{ scene: string, caps: Partial<import('/engine/swarm/swarm-layout.js').SwarmCaps>, ticks: number, wg: number, seed: number, check?: number }} cfg
+ * @param {{ scene: string, caps: Partial<import('/engine/swarm/swarm-layout.js').SwarmCaps>, ticks: number, wg: number, seed: number, check?: number,
+ *   timing?: import('/engine/swarm/swarm.js').SwarmTiming }} cfg
  */
 async function runSwarm(cfg) {
   gpu ??= await GpuDevice.create();
@@ -161,7 +162,7 @@ async function runSwarm(cfg) {
   nav = { cost, solver: new FlowField(layout.L.gridW, layout.L.gridW), layout };
   const tables = SwarmTables.build(layout, TEST_TYPES, TEST_STATUSES, cost);
   const t0 = performance.now();
-  const swarm = await Swarm.create(device, layout, tables, cfg.seed, { wg: cfg.wg });
+  const swarm = await Swarm.create(device, layout, tables, cfg.seed, { wg: cfg.wg, timing: cfg.timing });
   const compileMs = performance.now() - t0;
   const ref = new SwarmReference(layout, tables, { seed: cfg.seed });
   const inbound = new SwarmInbound(layout);
@@ -221,9 +222,10 @@ async function runSwarm(cfg) {
     collect(swarm, refBlocks, blockMismatches);
     await new Promise((r) => setTimeout(r, 5));
   }
+  const timing = swarm.gpuTiming();
   swarm.destroy();
   if (refBlocks.size || blockMismatches.count) return { ok: false, missingBlocks: refBlocks.size, blockMismatches };
-  return { ok: true, ticks: cfg.ticks, kills, maxAlive, scrapDropped, scrapCollected, maxCarry, events, hash: ref.hash(), compileMs, gpuMs, refMs, errors };
+  return { ok: true, ticks: cfg.ticks, kills, maxAlive, scrapDropped, scrapCollected, maxCarry, events, hash: ref.hash(), compileMs, gpuMs, refMs, timing, errors };
 }
 
 /**

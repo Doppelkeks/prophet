@@ -181,6 +181,12 @@ The stress scene is the swarm plus flat ground and particles.
 |---|---|---|
 | `high` reference GPU | 100k enemies / 50k projectiles | Swarm passes ≤ **6 ms** |
 
+The swarm half of the scene is `tools/stress/` ([10](engine/10-tooling-testing.md#testing-strategy)):
+- **Units:** SCRAPWAKE's types in its arena. The unit pool is kept full: kills are refilled from the rim.
+- **Fire:** 1024 fire commands per tick (the per-tick cap), with 48-tick shots that pierce, filling the 50k shot pool. 1 in 16 is a STRONGEST sniper shot, 1 in 16 is NEAREST, and the rest are AIMED.
+- **Also:** a player proxy that pushes and collects, its flow field re-solved every 30 ticks, and a stomp and a burning ring every 20 ticks.
+- **Measured:** GPU ms per swarm tick (p95) from `timestamp-query`, and zero event overflow.
+
 ---
 
 ## Memory budgets
@@ -336,4 +342,5 @@ Rationale and the alternative candidate are in [engine/04-pixel-art-pipeline.md]
 | 2026-09-26 | M0 review: K raised to 4 (desktop) / 8 (mobile) ticks with a p99 readback rule; readback ring depth; sim profiles; async commit lags; Q16/Q12 formats; state-hash interval; co-op input delay; ECS chunk size; density-map cell; portal payload caps; quality gates |
 | 2026-09-29 | Mobile dropped ([ADR-024](DECISIONS.md#adr-024-desktop-and-web-only)): tiers are `high` and `std` only. Removed the `mobile` columns and phone reference devices, K = 8, the mobile collapse lag, the mobile district, grids and dense cap, the iOS app size, the mobile boot, readback, input-latency and post targets, the touch target and the mobile voice count. One district size for every tier; the half-rate swarm is an unused `std` reserve. |
 | 2026-09-29 | Swarm v0: separation pairwise cap (8 units per bin cell) |
+| 2026-09-29 | The stress-ceiling scene defined as `tools/stress/` (load, fire mix, what is measured) |
 | 2026-09-29 | Frames in flight: 2 (the engine waits for the GPU instead of queueing unbounded work) |

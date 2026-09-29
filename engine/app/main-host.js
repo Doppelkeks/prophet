@@ -18,6 +18,7 @@ import { DevReload } from './dev-reload.js';
  * @property {number} frames                       frames rendered by the engine worker
  * @property {number} gpuWaits                     frames the engine skipped because the GPU was behind
  * @property {Record<string, any> | null} [swarm]  GPU swarm readback state (debug)
+ * @property {Record<string, any> | null} [perf]   fps, sim ms, readback p95 and swarm GPU timings (every 30 frames)
  * @property {Record<string, number> | null} hud   the last state-block snapshot, decoded
  * @property {{ dropped: number, retries: number }} bridge input records dropped, state-block read retries
  * @property {string | null} error
@@ -143,6 +144,7 @@ export class MainHost {
         units: num('units'),
         shots: num('shots'),
         pickups: num('pickups'),
+        timing: this.params.get('timing'),
       },
       { transfer: [offscreen] },
     );
@@ -170,6 +172,7 @@ export class MainHost {
         this.debug.frames = msg.frames;
         this.debug.gpuWaits = msg.gpuWaits ?? 0;
         this.debug.swarm = msg.swarm ?? null;
+        this.debug.perf = msg.perf ?? null;
         break;
       case 'device': // a device loss, then its recovery (docs/engine/03-rendering.md#device-loss)
         this.debug.device = { state: msg.state === 'restored' ? 'ok' : 'lost', recovered: msg.recovered, reason: msg.reason, tick: msg.tick ?? this.debug.device.tick };

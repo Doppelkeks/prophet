@@ -432,6 +432,18 @@ Repeated losses in a short window drop one performance tier. A persistent failur
 - **With `timestamp-query`:** every pass gets `timestampWrites`. The query set is resolved into a buffer that rides along in the readback slot, and per-pass times feed the perf overlay ([10](10-tooling-testing.md#dev-tools)) and CI. Browsers may quantize timestamps (to verify in M1), so we average over many frames.
 - **Without it:** CPU timers around encode and submit, plus `queue.onSubmittedWorkDone()` for an approximate GPU frame time, with no per-pass split.
 
+**Today (M1), the swarm is timed.** `engine/gpu/gpu-timer.js` owns the query set and a resolve buffer. The swarm's timing mode is set with `?timing=`:
+- **`tick`** (the default): each tick's compute pass writes one timestamp pair.
+- **`pass`**: every step of the pass chain runs in its own timed compute pass. The results are bit-identical (`swarm.spec.js` checks it against the reference), at a small cost.
+- **`off`**: no timestamps.
+
+Timing works like this:
+- At `endFrame` the frame resolves the pairs it wrote and copies them behind its outbound blocks in the readback slot. Timings come back with the blocks, in order, and never stall.
+- The engine keeps the GPU ms per tick in a 256-sample ring.
+- Every 30 frames it posts the p50 and p95 (and in `pass` mode, the mean per step) to `window.__px.perf`. The HUD's debug row shows `gpu95` next to `rb95`, the readback latency p95.
+
+**Pipeline warm-up.** The renderer's pipelines build while the sim boots and the swarm compiles its kernels. The engine's ready info reports `warmup: { ms, swarmMs, renderMs, pipelines }` in `__px.engine`. On SwiftShader that is 36 pipelines in about 1.1 s; the budget is [< 2 s](../BUDGETS.md#download--load-targets).
+
 ## Thread ownership
 
 | Thread | Rendering role |

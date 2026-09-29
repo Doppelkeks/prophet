@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Swarm stress</title>
+  <link rel="icon" href="/game/ui/favicon.svg" type="image/svg+xml">
+  <style>
+    body { margin: 0; padding: 16px; background: #070b16; color: #cfd8e3; font: 13px/1.5 ui-monospace, monospace; }
+    pre { white-space: pre-wrap; word-break: break-word; }
+  </style>
+  <script type="module">
+    import { config, run } from './stress.js';
+    const out = document.querySelector('pre');
+    const cfg = config(new URLSearchParams(location.search));
+    out.textContent = `running ${JSON.stringify(cfg)} …`;
+    run(cfg).then(
+      (report) => {
+        window.__stress = report;
+        out.textContent = JSON.stringify(report, null, 2);
+      },
+      (err) => {
+        window.__stress = { done: true, ok: false, errors: [String(err?.stack ?? err)] };
+        out.textContent = String(err?.stack ?? err);
+      },
+    );
+  </script>
+</head>
+<body><pre></pre></body>
+</html>

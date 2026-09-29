@@ -2,7 +2,9 @@
 // The GPU swarm (docs/engine/05-gpu-swarm.md): the v0 pass chain as WGSL compute kernels over the packed
 // buffers of SwarmLayout. Each simulated tick is encoded into the frame's command encoder, with its own
 // inbound block and parameter slot, followed by a copy of its outbound block into the frame's readback
-// slot. Blocks come back through the readback ring, strictly in submission order.
+// slot. Blocks come back through the readback ring, strictly in submission order. With `timestamp-query`,
+// each tick's pass (or, in `pass` timing, each step's) is timed, and the timings ride in the same slot.
+import { GpuTimer, PAIR_BYTES, Samples } from '../gpu/gpu-timer.js';
 import { ReadbackRing } from '../gpu/readback-ring.js';
 import { PipelineCache } from '../gpu/pipeline-cache.js';
 import { WgslPreprocessor } from '../gpu/wgsl-preprocessor.js';
@@ -22,24 +24,41 @@ const PARAM_WORDS = 12;
 
 /** @typedef {import('./reference/swarm-buffers.js').TickParams} TickParams */
 
+/**
+ * GPU timing: `tick` times each tick's pass, `pass` gives every step of PASSES its own timed compute pass
+ * (perf tools; the split costs a little), `off` never times. Without `timestamp-query` it is always off.
+ * @typedef {'tick' | 'pass' | 'off'} SwarmTiming
+ */
+
+/**
+ * @typedef {object} SwarmOptions
+ * @property {number} [wg] workgroup size: 32, 64, 128 or 256
+ * @property {number} [readbackSlots]
+ * @property {number} [K]
+ * @property {SwarmTiming} [timing] default `tick`
+ * @property {(path: string) => Promise<string>} [load]
+ */
+
 export class Swarm {
   /**
    * @param {GPUDevice} device
    * @param {SwarmLayout} layout
    * @param {Int32Array} tables
    * @param {number} seed
-   * @param {{ wg?: number, readbackSlots?: number, K?: number, load?: (path: string) => Promise<string> }} [options]
+   * @param {SwarmOptions} [options]
    */
   static async create(device, layout, tables, seed, options = {}) {
+    const t0 = performance.now();
     const swarm = new Swarm(device, layout, tables, seed, options);
     await swarm.#compile(options.load ?? WgslPreprocessor.fetchLoader);
+    swarm.warmupMs = performance.now() - t0;
     return swarm;
   }
 
   /**
    * Use Swarm.create.
    * @param {GPUDevice} device @param {SwarmLayout} layout @param {Int32Array} tables @param {number} seed
-   * @param {{ wg?: number, readbackSlots?: number, K?: number }} options
+   * @param {SwarmOptions} options
    */
   constructor(device, layout, tables, seed, options) {
     this.device = device;
@@ -67,7 +86,24 @@ export class Swarm {
     device.queue.writeBuffer(this.buffers.L, 0, layout.uniform(this.keys));
     device.queue.writeBuffer(this.buffers.T, 0, tables);
     this.outBytes = L.outWords * 4;
-    this.readback = new ReadbackRing(device, { slots: options.readbackSlots ?? Math.max(6, (options.K ?? 4) + 2), bytes: this.outBytes * layout.caps.ticksInFlight, label: 'swarm.readback' });
+    const K = layout.caps.ticksInFlight;
+    /** @type {SwarmTiming} */
+    this.timing = GpuTimer.supported(device) ? (options.timing ?? 'tick') : 'off';
+    this.timer = this.timing === 'off' ? null : new GpuTimer(device, this.timing === 'pass' ? K * PASSES.length : K, 'swarm.timer');
+    /** Byte offset of the timings in a readback slot, after the K outbound blocks (8-aligned for BigInt64Array). */
+    this.timesAt = (this.outBytes * K + 7) & ~7;
+    this.readback = new ReadbackRing(device, {
+      slots: options.readbackSlots ?? Math.max(6, (options.K ?? 4) + 2),
+      bytes: this.timesAt + (this.timer ? this.timer.bytes : 0),
+      label: 'swarm.readback',
+    });
+    /** GPU ms per tick, from timestamps (empty without them). */
+    this.gpuTick = new Samples(256);
+    /** Per-step GPU ns summed over `passTicks` ticks (`pass` timing only), in PASSES order. */
+    this.passNs = new Float64Array(PASSES.length);
+    this.passTicks = 0;
+    /** Wall ms Swarm.create spent building the pipelines. */
+    this.warmupMs = 0;
     const storage = (/** @type {boolean} */ ro) => ({ type: /** @type {GPUBufferBindingType} */ (ro ? 'read-only-storage' : 'storage') });
     this.bindLayout = device.createBindGroupLayout({
       label: 'swarm.bindings',
@@ -190,7 +226,7 @@ export class Swarm {
     if (k >= this.layout.caps.ticksInFlight) throw new Error('swarm: too many ticks in one frame');
     const p = this.#params(tick, k, inbound, prevFires);
     this.#write(k, inbound, p);
-    this.encodeTick(f.encoder, k, p, PASSES.length);
+    this.encodeTick(f.encoder, k, p, PASSES.length, true);
     f.encoder.copyBufferToBuffer(this.buffers.O, 0, f.slot.buffer, k * this.outBytes, this.outBytes);
     f.ticks.push(tick);
   }
@@ -200,6 +236,8 @@ export class Swarm {
     const f = this.frame;
     if (!f) return;
     this.frame = null;
+    const n = f.ticks.length;
+    if (this.timer) this.timer.resolve(f.encoder, this.timing === 'pass' ? n * PASSES.length : n, f.slot.buffer, this.timesAt);
     this.device.queue.submit([f.encoder.finish()]);
     if (f.ticks.length) this.readback.submitted(f.slot, f.ticks);
     else this.readback.release(f.slot);
@@ -208,10 +246,54 @@ export class Swarm {
   /** Collects the blocks of every harvested slot (call at frame start). */
   harvest() {
     return this.readback.harvest((slot, data) => {
-      for (let k = 0; k < slot.ticks.length; k++) {
+      const n = slot.ticks.length;
+      for (let k = 0; k < n; k++) {
         this.arrived.set(slot.ticks[k], SwarmOutbound.canonicalize(this.layout, new Int32Array(data, k * this.outBytes, this.outBytes >> 2)));
       }
+      if (this.timer) this.#times(new BigInt64Array(data, this.timesAt, (this.timing === 'pass' ? n * PASSES.length : n) * (PAIR_BYTES >> 3)), n);
     });
+  }
+
+  /** Records the timings of a harvested frame of `n` ticks. @param {BigInt64Array} pairs @param {number} n */
+  #times(pairs, n) {
+    if (this.timing === 'tick') {
+      for (let k = 0; k < n; k++) this.gpuTick.push(GpuTimer.ns(pairs, k) / 1e6);
+      return;
+    }
+    const S = PASSES.length;
+    for (let k = 0; k < n; k++) {
+      let sum = 0;
+      for (let i = 0; i < S; i++) {
+        const ns = GpuTimer.ns(pairs, k * S + i);
+        this.passNs[i] += ns;
+        sum += ns;
+      }
+      this.gpuTick.push(sum / 1e6);
+    }
+    this.passTicks += n;
+  }
+
+  /**
+   * GPU time per tick (p50 and p95, ms) over the recent ticks, and in `pass` timing the mean ms of each step
+   * since the last reset. Null without timestamps.
+   * @returns {{ mode: SwarmTiming, ticks: number, p50: number, p95: number, passes: Record<string, number> | null } | null}
+   */
+  gpuTiming() {
+    if (!this.timer) return null;
+    /** @type {Record<string, number> | null} */
+    let passes = null;
+    if (this.timing === 'pass' && this.passTicks) {
+      passes = {};
+      for (let i = 0; i < PASSES.length; i++) passes[PASSES[i]] = this.passNs[i] / this.passTicks / 1e6;
+    }
+    return { mode: this.timing, ticks: this.gpuTick.count, p50: this.gpuTick.percentile(0.5), p95: this.gpuTick.percentile(0.95), passes };
+  }
+
+  /** Drops the timings so far (after a warm-up). */
+  resetTiming() {
+    this.gpuTick.reset();
+    this.passNs.fill(0);
+    this.passTicks = 0;
   }
 
   /** @param {number} tick */
@@ -271,10 +353,12 @@ export class Swarm {
   }
 
   /**
-   * Encodes the first `count` passes of one tick (all of them normally; fewer for per-pass diffs).
+   * Encodes the first `count` passes of one tick (all of them normally; fewer for per-pass diffs). A timed
+   * tick writes timestamp pair k (`tick` timing) or pairs k·S … k·S + count − 1, one compute pass per step.
    * @param {GPUCommandEncoder} encoder @param {number} k parameter slot @param {TickParams} p @param {number} count
+   * @param {boolean} [timed]
    */
-  encodeTick(encoder, k, p, count) {
+  encodeTick(encoder, k, p, count, timed = false) {
     const L = this.layout.L;
     const pl = this.pipelines;
     const wg = this.wg;
@@ -285,8 +369,14 @@ export class Swarm {
       encoder.clearBuffer(this.buffers.P);
       encoder.clearBuffer(this.buffers.A);
     }
-    const pass = encoder.beginComputePass({ label: `swarm.tick${p.tick}` });
-    pass.setBindGroup(0, this.bindGroup, [k * PARAMS_STRIDE]);
+    const t = timed ? this.timer : null;
+    const split = t !== null && this.timing === 'pass';
+    const begin = (/** @type {string} */ label, /** @type {GPUComputePassTimestampWrites | undefined} */ timestampWrites) => {
+      const pass = encoder.beginComputePass({ label, timestampWrites });
+      pass.setBindGroup(0, this.bindGroup, [k * PARAMS_STRIDE]);
+      return pass;
+    };
+    let pass = begin(split ? `swarm.${PASSES[0]}` : `swarm.tick${p.tick}`, t ? t.writes[split ? k * PASSES.length : k] : undefined);
     const run = (/** @type {string} */ name, /** @type {number} */ x) => {
       if (x <= 0) return;
       pass.setPipeline(pl[name]);
@@ -322,7 +412,13 @@ export class Swarm {
       pickups: () => run('pickups', groups(L.pickCap)),
       finalize: () => run('finalize', 1),
     };
-    for (let i = 0; i < count; i++) steps[PASSES[i]]();
+    for (let i = 0; i < count; i++) {
+      if (split && i > 0) {
+        pass.end();
+        pass = begin(`swarm.${PASSES[i]}`, /** @type {GpuTimer} */ (t).writes[k * PASSES.length + i]);
+      }
+      steps[PASSES[i]]();
+    }
     pass.end();
   }
 
@@ -372,5 +468,6 @@ export class Swarm {
   destroy() {
     for (const b of Object.values(this.buffers)) b.destroy();
     this.readback.destroy();
+    this.timer?.destroy();
   }
 }

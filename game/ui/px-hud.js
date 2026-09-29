@@ -52,7 +52,7 @@ export class PxHud extends UiElement {
       <output id="taint" class="danger"></output></div>
     <div class="row dim"><span>tick</span><output id="tick"></output><output id="fps"></output><span>fps</span>
       <span>sim</span><output id="sim"></output><span>ms</span><span>stalls</span><output id="stalls"></output>
-      <span>rb95</span><output id="rb"></output></div>
+      <span>rb95</span><output id="rb"></output><span>gpu95</span><output id="gpu"></output></div>
     <div class="row dim"><output id="engine"></output><span>[=] [−] stress · []] burst</span></div>`;
 
   connected() {
@@ -90,6 +90,7 @@ export class PxHud extends UiElement {
     text('sim', hud.simMs, (v) => v.toFixed(2));
     text('stalls', hud.stalls, String);
     text('rb', hud.readbackP95, (v) => v.toFixed(1));
+    text('gpu', hud.swarmGpuP95, (v) => (v > 0 ? v.toFixed(2) : '–'));
     text('stress', hud.stress, String);
     text('shots', hud.shots, String);
     text('rejected', hud.rejected, String);

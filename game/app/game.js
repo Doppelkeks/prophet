@@ -119,5 +119,6 @@ export const SCRAPWAKE = {
     hud.set(I.skipped, frame.skipped);
     hud.set(I.entities, world.size);
     hud.set(I.readbackP95, frame.readbackP95 ?? 0);
+    hud.set(I.swarmGpuP95, frame.swarmGpuP95 ?? 0);
   },
 };

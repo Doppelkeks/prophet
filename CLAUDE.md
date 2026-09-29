@@ -21,6 +21,7 @@ Keep code and docs in sync.
 | `npm run build` | Production bundle in `dist/web` (`tools/build.js`; `prod.spec.js` rebuilds and tests it) |
 | `npm run electron:dev` | Electron serving the repo root |
 | `npm run replay -- f.json` | Replay an exported run (`__px.exportReplay()`) in Node on the JS reference swarm |
+| `/tools/stress/` (dev server) | Swarm stress scene: GPU ms per tick, readback p95, event overflow (`?units=&shots=&ticks=&timing=pass`) |
 
 ## Rules
 

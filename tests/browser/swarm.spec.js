@@ -32,12 +32,14 @@ for (const wg of [32, 64, 128]) {
   });
 }
 
-test('GPU equals reference when drops overflow a 16-slot pickup pool (the scrap carry and merged gems)', async ({ page }) => {
+// Also in `pass` timing: every step in its own timed compute pass must not change a single bit.
+test('GPU equals reference when drops overflow a 16-slot pickup pool (the scrap carry and merged gems), timed per pass', async ({ page }) => {
   test.setTimeout(240_000);
   const errors = await open(page);
-  const r = await page.evaluate((cfg) => /** @type {any} */ (window).runSwarm(cfg), { scene: 'mixed', caps: { ...SMALL, pickups: 16 }, ticks: 300, wg: 64, seed: 3 });
+  const r = await page.evaluate((cfg) => /** @type {any} */ (window).runSwarm(cfg), { scene: 'mixed', caps: { ...SMALL, pickups: 16 }, ticks: 300, wg: 64, seed: 3, timing: 'pass' });
   test.info().annotations.push({ type: 'result', description: JSON.stringify(r) });
   expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
+  if (r.timing) expect(Object.keys(r.timing.passes ?? {}).length, 'a mean for every step').toBe(17);
   expect(r.maxCarry).toBeGreaterThan(0); // drops found no free slot and waited in the carry
   expect(r.scrapCollected).toBeGreaterThan(0);
   expect(errors).toEqual([]);

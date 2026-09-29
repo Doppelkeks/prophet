@@ -68,6 +68,18 @@ test('boots in the shared tier with WebGPU inside the engine worker; PATCH moves
   await expect(page.locator('px-hud')).toContainText('PATCH');
   const bridge = await page.evaluate(() => window.__px?.bridge);
   expect(bridge?.dropped).toBe(0);
+  // Pipeline warm-up (docs/BUDGETS.md: < 2 s on real GPUs; SwiftShader only has to report it) and GPU timings.
+  const warmup = px?.engine?.warmup;
+  expect(warmup?.pipelines).toBeGreaterThanOrEqual(30);
+  expect(warmup?.swarmMs).toBeGreaterThan(0);
+  expect(warmup?.renderMs).toBeGreaterThan(0);
+  test.info().annotations.push({ type: 'warmup', description: JSON.stringify(warmup) });
+  if (px?.engine?.features.includes('timestamp-query')) {
+    expect(px?.engine?.timing).toBe('tick');
+    await page.waitForFunction(() => (window.__px?.perf?.swarmGpu?.ticks ?? 0) > 0, null, { timeout: 10_000 });
+    const perf = await page.evaluate(() => window.__px?.perf);
+    expect(perf?.swarmGpu.p95).toBeGreaterThan(0);
+  }
   expect(errors).toEqual([]);
 });
 

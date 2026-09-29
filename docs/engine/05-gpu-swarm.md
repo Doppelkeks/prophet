@@ -566,6 +566,8 @@ Tuning (durations per tier, damage per step, multipliers) lives in game data ([c
 - **Overflow:** tiny caps force overflows. Bits get set, stats go first, and counters stay exact.
 - **Device loss:** `device.destroy()` mid-run triggers the reset path, and a replay of that run reproduces the reset.
 - **Performance:** stress scenes against the [stress targets](../BUDGETS.md#stress-ceiling-scene-m2-exit), with zero overflow ([ROADMAP](../ROADMAP.md#milestones)).
+  - Today, `tools/stress/` runs the stress scene on the GPU swarm and reports GPU ms per tick (from timestamps, optionally split per step), wall ms per tick, readback p95, pool fill and event overflow ([10](10-tooling-testing.md#testing-strategy)).
+  - `tests/browser/stress.spec.js` runs it at 100k units and 50k shots on SwiftShader as a smoke test: no errors, blocks in order, **zero event overflow**, a full unit pool. Timings are only reported there, never asserted.
 
 ## Open questions
 

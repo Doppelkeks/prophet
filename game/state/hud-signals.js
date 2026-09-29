@@ -30,6 +30,7 @@ export const hud = {
   fps: new Signal(0),
   simMs: new Signal(0),
   readbackP95: new Signal(0),
+  swarmGpuP95: new Signal(0),
   stress: new Signal(0),
   rejected: new Signal(0),
   /** Threading tier, performance tier, frame driver, swarm backend and pools, scale (set once at boot). */
@@ -60,6 +61,7 @@ export function updateHud(r) {
   hud.fps.value = Math.round(r.get(I.fps));
   hud.simMs.value = Math.round(r.get(I.simMs) * 100) / 100;
   hud.readbackP95.value = Math.round(r.get(I.readbackP95) * 10) / 10;
+  hud.swarmGpuP95.value = Math.round(r.get(I.swarmGpuP95) * 100) / 100;
   hud.stress.value = r.get(I.stress);
   hud.rejected.value = r.get(I.rejected);
 }

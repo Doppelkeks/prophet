@@ -43,6 +43,7 @@ import { SimBoot } from './sim-boot.js';
  * @property {number | null} [units] unit-pool override
  * @property {number | null} [shots] shot-pool override
  * @property {number | null} [pickups] pickup-pool override
+ * @property {import('../swarm/swarm.js').SwarmTiming | null} [timing] swarm GPU timing (default tick)
  */
 
 /** Clear color when the game has no renderer: night-900. */
@@ -96,7 +97,7 @@ export class EngineHost {
     this.busy = false;
     this.last = -1;
     this.acc = 0;
-    this.stats = { fps: 0, frameMs: 0, simMs: 0, ticks: 0, skipped: 0, readbackP95: 0, gpuWaits: 0 };
+    this.stats = { fps: 0, frameMs: 0, simMs: 0, ticks: 0, skipped: 0, readbackP95: 0, gpuWaits: 0, swarmGpuP95: 0 };
     /** Frames submitted to the GPU and not finished yet. */
     this.inFlight = 0;
     /** Bumped for every new device, so events of a lost one are ignored. */
@@ -108,6 +109,8 @@ export class EngineHost {
     this.lossTimes = [];
     /** @type {{ layout: import('../swarm/swarm-layout.js').SwarmLayout, tables: Int32Array, seed: number } | null} */
     this.swarmArgs = null;
+    /** @type {import('../swarm/swarm.js').SwarmOptions} */
+    this.swarmOptions = {};
     scope.onmessage = (e) => this.onMessage(e.data);
   }
 
@@ -177,7 +180,7 @@ export class EngineHost {
       if (this.swarmArgs && sim?.swarm) {
         const { layout, tables, seed } = this.swarmArgs;
         this.swarm?.destroy();
-        const swarm = await Swarm.create(gpu.device, layout, tables, seed, { K: this.game.swarm?.K });
+        const swarm = await Swarm.create(gpu.device, layout, tables, seed, this.swarmOptions);
         this.swarm = swarm;
         sim.swarm.backend = swarm;
         sim.requestSwarmReset();
@@ -252,6 +255,18 @@ export class EngineHost {
     if (msg.shots) caps.shots = msg.shots;
     if (msg.pickups) caps.pickups = msg.pickups;
     const device = this.gpu.device;
+    this.swarmOptions = { K: this.game.swarm?.K, timing: msg.timing === 'pass' || msg.timing === 'off' ? msg.timing : 'tick' };
+    // Pipeline warm-up (docs/BUDGETS.md#download--load-targets): the renderer's pipelines build while the sim
+    // boots and the swarm compiles its kernels.
+    const t0 = performance.now();
+    let renderMs = 0;
+    const rendering = this.game.render
+      ? Renderer.create(device, this.gpu.format, this.game.render.style).then((r) => {
+          renderMs = performance.now() - t0;
+          return r;
+        })
+      : null;
+    rendering?.catch(() => {}); // awaited below; a failed sim boot must not leave it unhandled
     const boot = await SimBoot.create({
       game: this.game,
       heap,
@@ -261,7 +276,7 @@ export class EngineHost {
       swarm: gpuSwarm
         ? async (layout, tables, seed) => {
             this.swarmArgs = { layout, tables, seed }; // kept to rebuild the swarm after a device loss
-            return (this.swarm = await Swarm.create(device, layout, tables, seed, { K: this.game.swarm?.K }));
+            return (this.swarm = await Swarm.create(device, layout, tables, seed, this.swarmOptions));
           }
         : (layout, tables, seed) => new SwarmReference(layout, tables, { seed }),
       swarmProfile: gpuSwarm ? perf : 'test',
@@ -278,8 +293,8 @@ export class EngineHost {
       hashEvery: HASH_EVERY,
     };
     if (boot.swarm && !gpuSwarm) this.reference = /** @type {SwarmReference} */ (boot.swarm.backend);
-    if (this.game.render) {
-      const r = await Renderer.create(device, this.gpu.format, this.game.render.style);
+    if (rendering) {
+      const r = await rendering;
       r.resize(msg.canvas.width, msg.canvas.height);
       if (this.swarm) r.bindSwarm(this.swarm.layout, this.swarm.buffers.U, this.swarm.buffers.P);
       this.renderer = r;
@@ -311,6 +326,13 @@ export class EngineHost {
         format: this.gpu.format,
         features: [...this.gpu.features].sort(),
         manifest: boot.manifest.hash,
+        warmup: {
+          ms: performance.now() - t0,
+          swarmMs: this.swarm?.warmupMs ?? 0,
+          renderMs,
+          pipelines: Object.keys(this.swarm?.pipelines ?? {}).length + Object.keys(this.renderer?.pipelines ?? {}).length,
+        },
+        timing: this.swarm?.timing ?? 'off',
       },
       bridge: this.shared
         ? { buffer: heap.buffer, inputW: boot.plan.input.off >> 2, inputCapacity: this.ring.capacity, stateW: boot.plan.state.off >> 2, pingW: Heap.W.PING }
@@ -361,7 +383,10 @@ export class EngineHost {
       s.ticks = ticks;
       s.frameMs = dt;
       s.fps = s.fps ? s.fps + (1000 / Math.max(dt, 1) - s.fps) * 0.1 : 1000 / Math.max(dt, 1);
-      s.readbackP95 = swarm ? swarm.readback.p95() : 0;
+      if (swarm && this.frames % 30 === 0) {
+        s.readbackP95 = swarm.readback.p95();
+        s.swarmGpuP95 = swarm.gpuTick.percentile(0.95);
+      }
       this.render();
       this.inFlight++;
       const gen = this.deviceGen;
@@ -378,6 +403,7 @@ export class EngineHost {
           frames: this.frames,
           gpuWaits: s.gpuWaits,
           swarm: rb ? { tick: sim.tick, stalls: sim.stalls, starved: rb.starved, lost: rb.lost, reason: rb.lostReason, slots: rb.slots.map((x) => x.state).join(','), arrived: swarm.arrived.size } : null,
+          perf: { fps: s.fps, simMs: s.simMs, readbackP95: s.readbackP95, swarmGpu: swarm ? swarm.gpuTiming() : null },
         });
       }
     } catch (err) {

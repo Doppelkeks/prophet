@@ -10,6 +10,7 @@
  * @property {number} ticks ticks run this frame
  * @property {number} skipped frames skipped because the previous one was still running
  * @property {number} [readbackP95] ms from submit to harvest (GPU swarm)
+ * @property {number} [swarmGpuP95] GPU ms per swarm tick, p95 (timestamp-query only)
  * @property {number} [gpuWaits] frames that waited because the GPU was behind
  */
 

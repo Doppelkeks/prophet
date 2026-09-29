@@ -31,4 +31,5 @@ export const HUD = new StateSchema({
   skipped: 'u32', // frames skipped because the previous one was still running
   entities: 'u32',
   readbackP95: 'f32', // ms, submit → harvested (GPU swarm only)
+  swarmGpuP95: 'f32', // ms of GPU time per swarm tick (timestamp-query only)
 });
