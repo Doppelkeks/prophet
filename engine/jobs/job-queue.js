@@ -19,9 +19,14 @@ export class JobQueue {
   static CRIT = 0; // frame-critical lane (the engine thread helps drain it)
   static BG = 1; // background lane (job workers only)
 
-  /** Bytes the queue needs in the jobs arena. */
+  /** Bytes the queue needs in the jobs arena (a multiple of 64). */
   static bytes() {
     return (LINE * 32 + JobQueue.LANES * JobQueue.CAP * LINE + JobQueue.SLOTS * LINE) * 4;
+  }
+
+  /** The queue's default place: the start of the jobs arena. The rest of the arena is free for other rings. @param {import('../core/heap.js').Heap} heap */
+  static region(heap) {
+    return { off: heap.arena('jobs').off, size: JobQueue.bytes() };
   }
 
   /**

@@ -18,10 +18,13 @@ export class JobWorkerLoop {
   /**
    * @param {import('./worker-port.js').WorkerPort} port
    * @param {import('./kernel.js').KernelRegistry} registry
+   * @param {((heap: Heap, participant: number) => any) | null} [makeEnv] builds `ctx.env` once the shared heap is
+   *   attached; `participant` is this worker's index + 1 (0 is the engine thread)
    */
-  constructor(port, registry) {
+  constructor(port, registry, makeEnv = null) {
     this.port = port;
     this.registry = registry;
+    this.makeEnv = makeEnv;
     this.index = -1;
   }
 
@@ -69,7 +72,8 @@ export class JobWorkerLoop {
     const i32 = heap.i32;
     const onError = (/** @type {number} */ job, /** @type {string} */ key, /** @type {unknown} */ err) =>
       this.port.post({ type: 'job-error', job, key, message: JobWorkerLoop.message(err), index: this.index });
-    const exec = new JobExecutor({ heap, worker: this.index }, this.registry, onError);
+    const env = this.makeEnv ? this.makeEnv(heap, this.index + 1) : null;
+    const exec = new JobExecutor({ heap, worker: this.index, env }, this.registry, onError);
     const desc = new Int32Array(16);
     while (Atomics.load(i32, queue.stopW) === 0) {
       // Read the wake word BEFORE trying to pop: a push that lands in between changes it,
@@ -92,7 +96,7 @@ export class JobWorkerLoop {
     let error = '';
     try {
       const heap = Heap.wrap(msg.buffer);
-      this.registry.get(msg.kernel).run({ heap, worker: this.index }, Int32Array.from(msg.args), msg.begin, msg.end);
+      this.registry.get(msg.kernel).run({ heap, worker: this.index, env: null }, Int32Array.from(msg.args), msg.begin, msg.end);
     } catch (err) {
       error = JobWorkerLoop.message(err);
     }

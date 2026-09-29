@@ -58,9 +58,9 @@ Prophet's CPU core has four parts that share one rule: **hot data lives in one f
 
 ### Layout table and epoch
 
-- The **layout table** lives in the ECS arena. It holds one record per archetype (signature bitset, component list, row size, row capacity, column offsets), every ECS chunk header, and each archetype's ordered chunk list.
-- Only the engine worker writes it, and only at a sync point, when no job is running. Every change increments the **layout epoch** with `Atomics.add`.
-- Job workers keep JS-side caches: query → archetype lists, and column offset tables. At the start of a job they compare their cached epoch with the heap's and rebuild the caches if it moved. Layout changes happen only between jobs, so a job never sees a half-written table.
+- The ECS arena starts with the **ECS header** (`engine/ecs/ecs-reader.js`): entity capacity, the offsets of the entity location table, the free-index ring, the chunk dispatch list, the chunk pool and the command buffers, plus the layout epoch, the change clock and counters.
+- The archetype records (signature bitset, component list, row capacity, column offsets, ordered chunk list) live on the engine worker (`World`, `Archetype`). Only the engine worker changes them, and only at a sync point, when no job is running. Every change increments the **layout epoch** with `Atomics.add`.
+- Job workers need no cached layout: ECS chunk headers describe themselves ([archetype chunks](#archetype-chunks)), a chunk-parallel job receives the offsets of the chunks it may visit in a dispatch list, and entity lookups go through the location table. Layout changes happen only between jobs, so a job never sees a half-written chunk.
 
 ### Component manifest
 
@@ -78,7 +78,8 @@ An entity is a `u32` handle: an index in the low bits and a generation in the hi
 
 - The **entity location table** (SoA, in the ECS arena) stores per index: generation, archetype ID, ECS chunk slot and row.
 - Handle 0 is null, because generations start at 1. A handle is alive only while its generation matches the table.
-- Despawning bumps the generation and appends the index to a FIFO free list. Indices are only handed out while command buffers are applied, in a deterministic order ([below](#command-buffers-and-events)), so the same run always produces the same handles.
+- Despawning bumps the generation (65,535 wraps to 1, never 0) and appends the index to a FIFO free list. Index 0 is never handed out. Indices are only handed out while command buffers are applied, in a deterministic order ([below](#command-buffers-and-events)), so the same run always produces the same handles.
+- A spawn beyond the capacity is refused: the handle is null, and a counter records the refusal.
 
 ### Components
 
@@ -87,7 +88,7 @@ An entity is a `u32` handle: an index in the low bits and a generation in the hi
 | Data | `static schema = { field: type }` | One SoA column per field | Types: `i32`, `u32`, `u16`, `u8`, `entity` (a `u32` handle) |
 | Tag | An empty `schema` | None; it only sets an archetype bit | — |
 | Render-only | `static renderOnly = true` | Column | The only place `f32` is allowed. Sim systems may not declare it in `reads` or `writes`; the scheduler rejects them at boot. |
-| Managed | `static managed = true` | A plain JS object per entity, in a JS array on the engine worker | Sim thread only; any system that touches one is forced serial. It must implement `serialize()`, which feeds checkpoints and state hashes, and hold only integers and strings. |
+| Managed (not implemented yet) | `static managed = true` | A plain JS object per entity, in a JS array on the engine worker | Sim thread only; any system that touches one is forced serial. It must implement `serialize()`, which feeds checkpoints and state hashes, and hold only integers and strings. |
 
 ```js
 // @ts-check
@@ -95,18 +96,23 @@ import { Component } from '../../engine/ecs/component.js';
 
 /** Sim data: integers only. HP in Q8 fixed point. */
 export class Health extends Component {
-  static schema = { hp: 'i32', max: 'i32' };
+  static key = 'health';
+  static schema = /** @type {const} */ ({ hp: 'i32', max: 'i32' });
+  /** @type {number} */ static hp;   // field handles, installed by the ComponentRegistry
+  /** @type {number} */ static max;
 }
 
 /** Tag: no fields, only archetype membership. */
 export class Hostile extends Component {
-  static schema = {};
+  static key = 'hostile';
 }
 
 /** Render-only: f32 is allowed because no sim system may read it. */
 export class HitFlash extends Component {
-  static schema = { t: 'f32' };
+  static key = 'hit-flash';
+  static schema = /** @type {const} */ ({ t: 'f32' });
   static renderOnly = true;
+  /** @type {number} */ static t;
 }
 
 /** Managed: one plain object per entity, sim thread only, never chunk-parallel. */
@@ -117,21 +123,22 @@ export class LoadoutSheet extends Component {
 }
 ```
 
-At startup the registry installs **field handles** such as `Health.hp` from the manifest. A field handle is a small integer that encodes the component ID and the field index. The manifest generator also emits JSDoc declarations for them, so `tsc --checkJs` knows they exist.
+At startup the `ComponentRegistry` (`engine/ecs/registry.js`) installs **field handles** such as `Health.hp`, on every thread. A field handle is a small integer: `componentId << 8 | fieldIndex << 3 | typeCode`. Until the manifest generator exists, each component declares its handles as `/** @type {number} */ static hp;`, so `tsc --checkJs` knows them.
 
 ### Archetype chunks
 
-- An **ECS chunk** is a fixed-size block from the ECS pool (for example 16 KiB, tuned in M5). Every entity in it has the same archetype.
-- Row capacity per archetype is `floor((chunkBytes - headerBytes) / rowBytes)`. The columns follow the header, one per field, each 16-byte aligned.
-- The header is self-describing, so a kernel needs only the chunk's offset:
+- An **ECS chunk** is a fixed-size block from the ECS pool (16 KiB by default, tuned in M5). Every entity in it has the same archetype.
+- Row capacity per archetype is the largest count whose header and columns fit the chunk, about `(chunkBytes - headerBytes) / rowBytes`. The columns follow the header, one per field, each 16-byte aligned. Column 0 holds the entity handles.
+- New rows go into the archetype's first chunk with room; a new chunk is taken from the pool only when all are full.
+- The header is self-describing, so a kernel needs only the chunk's offset (`engine/ecs/chunk-view.js`). Every field is an `i32` word:
 
-| Header field | Type | Purpose |
-|---|---|---|
-| Archetype ID | `u16` | Which layout this chunk uses |
-| Count, capacity | `u16`, `u16` | Live rows and maximum rows |
-| Sequence | `u32` | Creation order within the archetype; this is the deterministic iteration key |
-| Column offsets | `u32` per column | Byte offset of each column from the chunk base |
-| Change ticks | `u32` per column | The last tick on which a system with write access visited this column |
+| Header word | Purpose |
+|---|---|
+| 0: archetype ID | Which layout this chunk uses |
+| 1, 2: count, capacity | Live rows and maximum rows |
+| 3: sequence | Creation order within the archetype; this is the deterministic iteration key |
+| 4, 5: column count, header words | Size of the column table |
+| 8 + 3*c*: field handle, byte offset, change tick | Column *c*: which field it holds (−1 for the entity column), where it starts, and the change clock of the last system with write access that visited it |
 
 - Adding or removing a component moves the row into a chunk of another archetype. This happens only at a sync point. Removal swaps the last row into the hole and patches the moved entity's location.
 - An empty ECS chunk goes back to the pool. The archetype's chunk list keeps the order of the remaining chunks.
@@ -140,7 +147,7 @@ At startup the registry installs **field handles** such as `Health.hp` from the 
 
 - A query is `{ all, none, any, changed }` over component classes. It is compiled into bitset signatures over component IDs.
 - Each query caches its matching archetypes. Archetypes are never destroyed, so when the epoch changes the cache only appends new matches.
-- **Change detection** works per ECS chunk and per column. `changed: [Health]` skips a chunk whose `Health` change tick is not newer than the system's last run. Visiting a chunk with write access bumps the tick whether or not a row actually changed, which is cheap and conservative.
+- **Change detection** works per ECS chunk and per column, against a **change clock** that ticks once per system run and once per command apply. `changed: [Health]` skips a chunk whose `Health` columns are all no newer than the system's last run; with several components, one changed column is enough. Visiting a chunk with write access bumps the tick whether or not a row actually changed, which is cheap and conservative. New rows and command `set`s bump the columns they write. Tags have no columns and can't be in `changed`.
 - **Iteration order** is fixed: archetype ID, then chunk sequence, then row. It never follows pool slots or addresses ([09](09-determinism-coop.md#rules-for-sim-code)).
 
 A system with a query, and spawning through the command buffer:
@@ -148,11 +155,13 @@ A system with a query, and spawning through the command buffer:
 ```js
 // @ts-check
 import { System } from '../../engine/ecs/system.js';
-import { Health, Hostile, Transform, Wreck } from '../components/index.js';
+import { Health, Hostile, Transform } from '../components/index.js';
+import { ARCHETYPES } from '../archetypes.js';  // archetype IDs, created in a fixed order at boot
 import { DamageApplySystem } from './damage-apply-system.js';
 
 /** Despawns dead enemies and leaves a wreck. Runs serially or chunk-parallel, unchanged. */
 export class DeathSystem extends System {
+  static key = 'death';
   static stage = 'PostSim';
   static reads = [Health, Transform];
   static writes = [];                      // structural changes go through the command buffer
@@ -169,9 +178,9 @@ export class DeathSystem extends System {
     for (let i = 0, n = c.count; i < n; i++) {
       if (I32[hp + i] > 0) continue;
       cmd.despawn(c.entity(i));
-      const w = cmd.spawn(Wreck.archetype);  // provisional handle; the real one is assigned at apply time
-      cmd.setI32(w, Transform.x, I32[x + i]);
-      cmd.setI32(w, Transform.y, I32[y + i]);
+      const w = cmd.spawn(ARCHETYPES.wreck);  // provisional handle; the real one is assigned at apply time
+      cmd.set(w, Transform.x, I32[x + i]);
+      cmd.set(w, Transform.y, I32[y + i]);
     }
   }
 }
@@ -182,20 +191,24 @@ Creating the world on the engine worker:
 ```js
 // @ts-check
 import { Heap } from '../../engine/core/heap.js';
-import { World } from '../../engine/ecs/world.js';
+import { EcsEnv } from '../../engine/ecs/ecs-env.js';
+import { Manifest } from '../../engine/ecs/registry.js';
 import { Scheduler } from '../../engine/ecs/scheduler.js';
-import { MANIFEST } from '../generated/manifest.js';
+import { World } from '../../engine/ecs/world.js';
+import { JobSystem } from '../../engine/jobs/job-system.js';
+import { GAME_MANIFEST } from './manifest.js';
 
 /** Engine-worker bootstrap (excerpt). */
 export class SimBoot {
-  /** @param {import('../../engine/platform/tiers.js').TierInfo} tier */
+  /** @param {{ perf: 'high' | 'std', threading: 'shared' | 'transfer', workers: number, spawn: (i: number) => any }} tier */
   static async start(tier) {
-    const heap = Heap.create(tier.heapProfile, tier.threading);  // fixed Memory; arenas carved once
-    const world = new World(heap, MANIFEST);         // writes the manifest hash into the heap header
-    const scheduler = new Scheduler(world, tier);    // stages and DAG from static declarations
-    scheduler.addAll(MANIFEST.systems);              // in system-ID order
-    await scheduler.startWorkers(tier.jobWorkers);   // every worker verifies the manifest hash
-    return scheduler;
+    const heap = Heap.create(tier.perf, tier.threading === 'shared');  // fixed Memory; arenas carved once
+    const manifest = new Manifest(GAME_MANIFEST);           // IDs by static key; field handles installed
+    const world = new World(heap, manifest, { participants: tier.workers + 1 });
+    const env = new EcsEnv(heap, manifest, 0, {});          // the engine thread's systems and command buffer
+    const jobs = await JobSystem.create({ tier: tier.threading, heap, registry: manifest.kernels,
+      workers: tier.workers, spawn: tier.spawn, env });     // every worker verifies the manifest hash
+    return new Scheduler({ world, env, jobs });             // stages and DAG from static declarations
   }
 }
 ```
@@ -220,6 +233,8 @@ Systems are grouped into stages. `Input`, `PreSim`, `Sim` and `PostSim` run once
 1. Add every explicit `after` and `before` edge. A cycle is a boot error that names the systems involved.
 2. The **serial order** is a topological sort that always takes the ready system with the **lowest system ID** (Kahn's algorithm with a min-heap). System IDs come from the manifest, so the order is identical on every machine.
 3. Two systems **conflict** when one writes a component or event type that the other reads or writes. Every conflicting pair gets an edge in serial order. Because that order is total, these edges can't create a cycle, and any concurrent schedule that respects them matches the serial run. Dev builds warn about conflicting pairs that have no explicit order, so authors make the intent explicit.
+
+**Execution.** Systems run one at a time, in serial order (`engine/ecs/scheduler.js`). A system with a query runs over the matching ECS chunks either serially on the engine worker or chunk-parallel through the job system; both open the same command segments. Running non-conflicting systems concurrently, which the DAG allows, is left for when profiles show it pays.
 
 **Sync points.** Between stages, the engine worker applies the command buffers, sorts multi-writer event channels, and bumps the layout epoch if archetypes or chunk lists changed.
 
@@ -365,7 +380,7 @@ The last row is the point. Because results that affect the sim commit at fixed t
 
 Structural changes, and writes to *other* entities, never happen in place during iteration. They are recorded into **command buffers** and applied at the next sync point.
 
-- **Per thread, per chunk visit.** Each participant records into its own command ring in the jobs arena, which the sync point drains completely. Every chunk visit, in serial and parallel runs alike, opens a **segment** tagged with `(system ID, chunk index)`; systems that don't iterate chunks use chunk index 0.
+- **Per thread, per chunk visit.** Each participant (the engine worker, then one per job worker) records into its own command buffer in the jobs arena, which the sync point drains completely (`engine/ecs/command-buffer.js`). Every chunk visit, in serial and parallel runs alike, opens a **segment** tagged with `(system ID, chunk index)`, where the chunk index is the chunk's position in that run's dispatch list; systems that don't iterate chunks use chunk index 0. A full buffer currently fails the job with `command-buffer-overflow`; spill pages from the reserve come later.
 - **Binary records** made of 32-bit words:
 
 | Op | Payload | Semantics at apply time |
@@ -384,7 +399,7 @@ Structural changes, and writes to *other* entities, never happen in place during
 
 ### Event channels
 
-Events let systems talk across entities without write conflicts.
+Events let systems talk across entities without write conflicts. *Not implemented yet: they arrive with the swarm's GPU events. The scheduler already orders systems by `readsEvents` and `writesEvents`.*
 
 - An **event type** is a class with a `static schema`, like a component. Each type has a **SoA ring** in the jobs arena.
 - A writer reserves a slot with `Atomics.add` on the channel's cursor, then writes the fields and a 64-bit order key: (system ID, chunk index, row, sequence).

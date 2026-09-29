@@ -5,6 +5,7 @@ import { Hash32 } from '../core/hash32.js';
  * @typedef {object} JobContext
  * @property {import('../core/heap.js').Heap} heap the heap this job runs on (the shared heap, or a transfer-tier copy)
  * @property {number} worker executor index: -1 for the engine thread, 0..N-1 for job workers
+ * @property {any} [env] per-thread environment built by the app (for example the ECS systems of that thread); null in the transfer tier
  */
 
 /**
@@ -18,7 +19,7 @@ export class Kernel {
 
   /**
    * @param {JobContext} ctx
-   * @param {Int32Array} args six argument words (usually byte offsets into the heap)
+   * @param {Int32Array} args six argument words (usually byte offsets into the heap); reused between calls, never keep it
    * @param {number} begin first item of this slice
    * @param {number} end one past the last item
    */
@@ -29,15 +30,18 @@ export class Kernel {
 
 /** Numbers kernels by sorted key, identically on every thread, and hashes the list for manifest checks. */
 export class KernelRegistry {
-  /** @param {(typeof Kernel)[]} kernels */
-  constructor(kernels) {
+  /**
+   * @param {(typeof Kernel)[]} kernels
+   * @param {number} [salt] hash of the rest of the manifest (components, systems), so the check covers it too
+   */
+  constructor(kernels, salt = 0) {
     const sorted = [...kernels].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
     /** @type {Map<typeof Kernel, number>} */
     this.ids = new Map();
     /** @type {Kernel[]} */
     this.instances = [];
-    let h = Hash32.begin(0x4b45524e); // 'KERN'
-    let words = 0;
+    let h = Hash32.step(Hash32.begin(0x4b45524e), salt); // 'KERN'
+    let words = 1;
     for (let i = 0; i < sorted.length; i++) {
       const K = sorted[i];
       if (!K.key) throw new Error('kernel without a static key');

@@ -23,7 +23,8 @@ import { TransferDispatcher } from './transfer-dispatcher.js';
  * @property {import('./kernel.js').KernelRegistry} registry the same kernel list the job workers import
  * @property {number} [workers] job workers to spawn (ignored in the `inline` tier)
  * @property {(index: number) => WorkerHandle} [spawn] starts job worker `index`
- * @property {{ off: number, size: number }} [region] heap region for the job queue (default: the jobs arena)
+ * @property {{ off: number, size: number }} [region] heap region for the job queue (default: `JobQueue.region(heap)`)
+ * @property {any} [env] `ctx.env` for kernels that run on the engine thread (it helps drain the queue)
  * @property {number} [waitMs] job-worker sleep timeout; a safety net only, since producers always notify
  * @property {import('./job-executor.js').JobErrorHandler} [onJobError] a kernel threw (default: console.error)
  */
@@ -73,7 +74,7 @@ export class JobSystem {
     this.tier = options.tier;
     this.heap = options.heap;
     this.registry = options.registry;
-    this.region = options.region ?? options.heap.arena('jobs');
+    this.region = options.region ?? JobQueue.region(options.heap);
     this.onJobError =
       options.onJobError ??
       ((job, key, err) => {
@@ -86,7 +87,7 @@ export class JobSystem {
     /** @type {TransferDispatcher | null} */
     this.dispatcher = null;
     this.stopped = 0;
-    this.ctx = { heap: this.heap, worker: -1 };
+    this.ctx = { heap: this.heap, worker: -1, env: options.env ?? null };
     if (this.tier === 'shared') {
       if (!this.heap.shared) throw new Error('the shared threading tier needs a shared heap');
       this.queue = new JobQueue(this.heap, this.region);
