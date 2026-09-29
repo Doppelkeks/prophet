@@ -33,6 +33,15 @@ export class SwarmMath {
     return d < 4 && d > -4 ? target : v + (d >> 2);
   }
 
+  /**
+   * Whether bin cell (cx, cy) is blocked (the blocked bits in T, from the nav cost grid).
+   * @param {Record<string, number>} L @param {Int32Array} T @param {number} cx @param {number} cy
+   */
+  static blocked(L, T, cx, cy) {
+    const c = Math.imul(cy, L.gridW) + cx;
+    return ((T[L.tBlocked + (c >>> 5)] >>> (c & 31)) & 1) !== 0;
+  }
+
   /** Bin column of a position. @param {Record<string, number>} L @param {number} x */
   static cellX(L, x) {
     return Fixed.clamp((x - L.originX) >> L.cellShift, 0, L.gridW - 1);

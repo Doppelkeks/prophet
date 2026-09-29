@@ -4,7 +4,7 @@
 // when and what; the GPU decides who and where."
 import { SIN_TABLE_Q14, SIN_TABLE_SIZE } from '../core/sin-table.js';
 import {
-  EFFECT_WORDS, EVENT_WORDS, FIRE_WORDS, GROUP_WORDS, HEADER_WORDS, IH, OH, OUT_MAGIC, PROXY_WORDS, STATUS_COUNT, STATUS_WORDS, TY, TYPE_WORDS,
+  EFFECT_WORDS, EVENT_WORDS, FIRE_WORDS, GROUP_WORDS, HEADER_WORDS, IH, INFLAG, OH, OUT_MAGIC, PROXY_WORDS, STATUS_COUNT, STATUS_WORDS, TY, TYPE_WORDS,
 } from './swarm-layout.js';
 
 /** Target modes. v0: every mode chases proxy 0. */
@@ -52,12 +52,13 @@ export const MAX_IMPULSE = 4096;
 
 export class SwarmTables {
   /**
-   * The T buffer: the sine table, the type table, then the status table.
+   * The T buffer: the sine table, the type table, the status table, then the blocked-cell bits.
    * @param {import('./swarm-layout.js').SwarmLayout} layout
    * @param {UnitType[]} types
    * @param {StatusSpec[]} [statuses] by Status index; missing statuses last 0 steps and deal no damage
+   * @param {Uint8Array | null} [cost] the nav cost grid on the bin grid (0 = blocked); null: nothing blocked
    */
-  static build(layout, types, statuses = []) {
+  static build(layout, types, statuses = [], cost = null) {
     if (types.length > layout.caps.types) throw new Error('swarm: more unit types than the type table holds');
     const t = new Int32Array(layout.words.T);
     t.set(SIN_TABLE_Q14, layout.L.tSin);
@@ -90,6 +91,10 @@ export class SwarmTables {
       t[at] = d1 | (d2 << 8) | (d3 << 16);
       t[at + 1] = st.damage ?? 0;
     }
+    if (cost) {
+      if (cost.length !== layout.L.cells) throw new Error('swarm: the cost grid must match the bin grid');
+      for (let c = 0; c < cost.length; c++) if (cost[c] === 0) t[layout.L.tBlocked + (c >>> 5)] |= 1 << (c & 31);
+    }
     return t;
   }
 
@@ -112,6 +117,8 @@ export class SwarmInbound {
     this.flags = 0;
     /** Scrap value the CPU puts back on the ground this tick (after a swarm reset). */
     this.scrapIn = 0;
+    /** @type {Int32Array | null} a flow field committed this tick (FlowField words), or null */
+    this.field = null;
     /** Records beyond a cap, dropped in submission order (reported as not fired / rejected). */
     this.dropped = 0;
   }
@@ -120,6 +127,7 @@ export class SwarmInbound {
   reset() {
     this.block.fill(0);
     this.groups = this.fires = this.proxies = this.effects = this.requests = this.flags = this.scrapIn = this.dropped = 0;
+    this.field = null;
   }
 
   /**
@@ -247,7 +255,18 @@ export class SwarmInbound {
 
   /** Requests a swarm reset this tick (device loss). */
   requestReset() {
-    this.flags |= 1;
+    this.flags |= INFLAG.RESET;
+  }
+
+  /**
+   * Commits a flow field on this tick: from here on, units steer by it (the field swap). The backend copies
+   * it when the tick is submitted. Swaps must be at least `ticksInFlight` ticks apart.
+   * @param {Int32Array} words one FlowField word per bin cell
+   */
+  setField(words) {
+    if (words.length !== this.layout.L.cells) throw new Error('swarm: a flow field must cover the bin grid');
+    this.field = words;
+    this.flags |= INFLAG.FIELD_SWAP;
   }
 
   /** Writes the header and returns the block. @param {number} tick */

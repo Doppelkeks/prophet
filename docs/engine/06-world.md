@@ -312,6 +312,13 @@ export class FlowFieldSolver {
 
 Every queued distance lies within one step cost of the current bucket, so `maxStep + 1` circular buckets never alias. A second pass points each cell at its lowest-distance neighbor, breaking ties in the fixed neighbor order.
 
+**Today (M2 tech demo).**
+- **Solver.** `engine/nav/sim/flow-field.js` implements the solver above: 8 neighbors, with costs 10 straight and 14 diagonal, times the cost byte. It never cuts corners and is allocation-free. It packs each cell as `angle | distance << 16`, with 0xFFFF for no path.
+- **The arena.** SCRAPWAKE's arena has indestructible pillars and walls on the player-field grid (`game/data/arena.js`). Voxel buildings replace them in M3. The grid is the swarm's bin grid, and walls become the swarm's blocked cells ([05](05-gpu-swarm.md#flow-fields-and-walls-in-m2)).
+- **Commit rule.** `NavFieldSystem` requests a solve when PATCH enters a new cell, at most every *L_field* ticks. It commits the field on request tick + *L_field*, from the cell of the request tick, and the swarm steers by it from that tick. The solve itself runs on the engine thread at the commit tick (well under 1 ms at 128 × 128); moving it to a job changes nothing about the result.
+- **PATCH collision.** PATCH slides along obstacles the same way units do: the x step, then the y step.
+- **Not yet built:** the base field and wall costs.
+
 ## Procedural generation
 
 Districts come from a seeded, deterministic pipeline. PCG counts as simulation code: it is integer-only, and its randomness comes from the stateless hash RNG keyed by (seed, stage, ID) ([09](09-determinism-coop.md#random-numbers)). Every co-op peer, and every checkpoint load, generates the same bytes.

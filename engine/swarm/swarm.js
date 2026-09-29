@@ -7,7 +7,7 @@ import { ReadbackRing } from '../gpu/readback-ring.js';
 import { PipelineCache } from '../gpu/pipeline-cache.js';
 import { WgslPreprocessor } from '../gpu/wgsl-preprocessor.js';
 import { EffectShape, EventClass, EventKind, MAX_IMPULSE, ProxyFlag, SwarmKeys, SwarmOutbound, Team, UnitFlag } from './swarm-contract.js';
-import { IH, LAYOUT_FIELDS, SwarmLayout } from './swarm-layout.js';
+import { FIELD_NONE, IH, INFLAG, LAYOUT_FIELDS, SwarmLayout } from './swarm-layout.js';
 import { CARRY_OFFSET } from './reference/pickup-spawn.js';
 import { MAGNET_SPEED, PICKUP_RADIUS } from './reference/pickups.js';
 import { PRESSURE, PUSH_SHIFT, SEP_SHIFT } from './reference/steer.js';
@@ -61,6 +61,7 @@ export class Swarm {
       I: buf('I', w.I, S | GPUBufferUsage.COPY_DST),
       O: buf('O', w.O, RW),
       T: buf('T', w.T, S | GPUBufferUsage.COPY_DST),
+      G: buf('G', w.G, S | GPUBufferUsage.COPY_DST),
     };
     device.queue.writeBuffer(this.buffers.L, 0, layout.uniform(this.keys));
     device.queue.writeBuffer(this.buffers.T, 0, tables);
@@ -78,6 +79,7 @@ export class Swarm {
         { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: storage(true) },
         { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: storage(false) },
         { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: storage(true) },
+        { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: storage(true) },
       ],
     });
     const b = this.buffers;
@@ -93,6 +95,7 @@ export class Swarm {
         { binding: 5, resource: { buffer: b.I } },
         { binding: 6, resource: { buffer: b.O } },
         { binding: 7, resource: { buffer: b.T } },
+        { binding: 8, resource: { buffer: b.G } },
       ],
     });
     this.pipelineLayout = device.createPipelineLayout({ label: 'swarm.layout', bindGroupLayouts: [this.bindLayout] });
@@ -104,6 +107,8 @@ export class Swarm {
     /** @type {Map<number, Int32Array>} */
     this.arrived = new Map();
     this.params = new Uint32Array(PARAM_WORDS);
+    this.fieldSel = 0;
+    this.fieldValid = false;
   }
 
   /** @param {(path: string) => Promise<string>} load */
@@ -170,8 +175,9 @@ export class Swarm {
     return this.layout.caps.ticksInFlight;
   }
 
-  /** @param {number} tick @param {Int32Array} inbound @param {number} prevFires */
-  submit(tick, inbound, prevFires) {
+  /** @param {number} tick @param {Int32Array} inbound @param {number} prevFires @param {Int32Array | null} [field] */
+  submit(tick, inbound, prevFires, field = null) {
+    this.#field(inbound, field);
     const f = this.frame;
     if (!f) throw new Error('swarm: submit() outside beginFrame()/endFrame()');
     const k = f.ticks.length;
@@ -222,7 +228,22 @@ export class Swarm {
       effects: inbound[IH.EFFECTS],
       requests: inbound[IH.REQUESTS],
       flags: inbound[IH.FLAGS],
+      field: this.fieldValid ? this.fieldSel : FIELD_NONE,
     };
+  }
+
+  /**
+   * The flow-field double buffer: a committed field goes into the other half, which this tick reads from
+   * then on. Swaps are at least `ticksInFlight` ticks apart, so a frame never overwrites a half that one of
+   * its earlier ticks still reads. A reset swarm has no field until the next swap.
+   * @param {Int32Array} inbound @param {Int32Array | null} field
+   */
+  #field(inbound, field) {
+    if (inbound[IH.FLAGS] & INFLAG.RESET) this.fieldValid = false;
+    if (!field) return;
+    this.fieldSel ^= 1;
+    this.device.queue.writeBuffer(this.buffers.G, this.fieldSel * this.layout.L.cells * 4, field.buffer, field.byteOffset, field.byteLength);
+    this.fieldValid = true;
   }
 
   /** @param {number} k @param {Int32Array} inbound @param {TickParams} p */
@@ -239,6 +260,7 @@ export class Swarm {
     w[6] = p.requests;
     w[7] = p.flags;
     w[8] = p.effects;
+    w[9] = p.field;
     q.writeBuffer(this.buffers.TP, k * PARAMS_STRIDE, w);
   }
 

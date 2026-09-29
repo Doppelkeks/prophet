@@ -9,10 +9,41 @@ import { SwarmLayout } from '/engine/swarm/swarm-layout.js';
 import { EffectShape, ProxyFlag, Status, SwarmInbound, SwarmOutbound, SwarmTables, Team } from '/engine/swarm/swarm-contract.js';
 import { PASSES, SwarmReference } from '/engine/swarm/reference/swarm-reference.js';
 import { TEST_STATUSES, TEST_TYPES } from '/tests/support/swarm-harness.js';
+import { FlowField } from '/engine/nav/sim/flow-field.js';
 
 const M = 1024;
 /** @type {GpuDevice | null} */
 let gpu = null;
+
+/**
+ * The scene's navigation: a cost grid on the bin grid (pillars and walls) and a solver. Scenes commit a
+ * field toward proxy 0 every 30 ticks.
+ * @type {{ cost: Uint8Array, solver: FlowField, layout: SwarmLayout } | null}
+ */
+let nav = null;
+
+/** @param {SwarmLayout} layout */
+function arena(layout) {
+  const W = layout.L.gridW;
+  const cost = new Uint8Array(W * W).fill(1);
+  const block = (/** @type {number} */ x0, /** @type {number} */ y0, /** @type {number} */ w, /** @type {number} */ h) => {
+    for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) if (x >= 0 && y >= 0 && x < W && y < W) cost[y * W + x] = 0;
+  };
+  const c = W >> 1;
+  for (const [dx, dy] of [[-8, -8], [6, -8], [-8, 6], [6, 6], [-2, 10], [10, -2]]) block(c + dx, c + dy, 2, 2); // pillars
+  block(c - 12, c + 14, 16, 1); // walls
+  block(c + 14, c - 12, 1, 16);
+  return cost;
+}
+
+/** Commits a field toward (x, y) on tick t when t is a multiple of 30. @param {SwarmInbound} i @param {number} t @param {number} x @param {number} y */
+function steerBy(i, t, x, y) {
+  if (!nav || t % 30 !== 0) return;
+  const L = nav.layout.L;
+  const cx = Math.max(0, Math.min(L.gridW - 1, (x - L.originX) >> L.cellShift));
+  const cy = Math.max(0, Math.min(L.gridW - 1, (y - L.originY) >> L.cellShift));
+  i.setField(nav.solver.solve(nav.cost, cy * L.gridW + cx));
+}
 
 /** @type {Record<string, (i: SwarmInbound, t: number) => void>} */
 const SCENES = {
@@ -26,6 +57,7 @@ const SCENES = {
     if (t % 25 === 0) i.spawnRing({ type: (t / 25) % 3, count: 180, cx: px, cy: py, r0: 10 * M, r1: 20 * M });
     // Two collectors with overlapping magnets: every gem goes to the nearer one.
     i.proxy({ entity: 1, x: px, y: py, radius: 512, team: Team.PLAYER, flags: ProxyFlag.PUSHES | ProxyFlag.TARGETABLE | ProxyFlag.COLLECTOR, aux: 5 * M });
+    steerBy(i, t, px, py);
     i.proxy({ entity: 2, x: -px, y: 3 * M, radius: 700, team: Team.PLAYER, flags: ProxyFlag.COLLECTOR, aux: 3 * M });
     if (t === 150) i.depositScrap(9);
     // Area effects: a stunning knockback circle, a burning ring, marking and slowing circles.
@@ -45,6 +77,7 @@ const SCENES = {
       for (let g = 0; g < 50; g++) i.spawnRing({ type: g % 3, count: 2000, cx: ((g % 10) - 5) * 10 * M, cy: (Math.floor(g / 10) - 2) * 10 * M, r0: 0, r1: 8 * M });
     }
     i.proxy({ entity: 1, x: 0, y: 0, radius: 512, team: Team.PLAYER, flags: ProxyFlag.PUSHES | ProxyFlag.COLLECTOR, aux: 6 * M });
+    steerBy(i, t, 0, 0);
     // Non-lethal effects over most of the crowd: the 100k pools stay full while every unit takes hits.
     if (t % 2 === 1) {
       for (let e = 0; e < 16; e++) i.effect({ x: ((e % 4) - 2) * 20 * M, y: (Math.floor(e / 4) - 2) * 20 * M, radius: 10 * M, damage: 60, impulse: 200, status: Status.STUNNED, tier: 2, source: e });
@@ -119,7 +152,9 @@ async function runSwarm(cfg) {
   const errors = [];
   device.addEventListener('uncapturederror', (e) => errors.push(/** @type {GPUUncapturedErrorEvent} */ (e).error.message));
   const layout = new SwarmLayout(cfg.caps);
-  const tables = SwarmTables.build(layout, TEST_TYPES, TEST_STATUSES);
+  const cost = arena(layout);
+  nav = { cost, solver: new FlowField(layout.L.gridW, layout.L.gridW), layout };
+  const tables = SwarmTables.build(layout, TEST_TYPES, TEST_STATUSES, cost);
   const t0 = performance.now();
   const swarm = await Swarm.create(device, layout, tables, cfg.seed, { wg: cfg.wg });
   const compileMs = performance.now() - t0;
@@ -147,12 +182,12 @@ async function runSwarm(cfg) {
     const block = inbound.finish(t).slice();
     let s = performance.now();
     await frameSlot(swarm, refBlocks, blockMismatches);
-    swarm.submit(t, block, prevFires);
+    swarm.submit(t, block, prevFires, inbound.field);
     swarm.endFrame();
     const g = t % check === 0 || t === cfg.ticks - 1 ? await swarm.readState() : null;
     gpuMs += performance.now() - s;
     s = performance.now();
-    ref.submit(t, block, prevFires);
+    ref.submit(t, block, prevFires, inbound.field);
     refMs += performance.now() - s;
     const refBlock = /** @type {Int32Array} */ (ref.take(t));
     refBlocks.set(t, refBlock);

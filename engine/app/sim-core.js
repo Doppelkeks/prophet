@@ -180,7 +180,7 @@ export class SimCore {
     await this.scheduler.tick();
     if (swarm) {
       const inbound = /** @type {SwarmInbound} */ (res.swarm);
-      swarm.backend.submit(t, inbound.finish(t), this.prevFires);
+      swarm.backend.submit(t, inbound.finish(t), this.prevFires, inbound.field);
       this.prevFires = inbound.fires;
     }
     this.tick = t + 1;

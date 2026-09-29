@@ -19,6 +19,8 @@
  * @property {number} seed run seed of the swarm's RNG streams
  * @property {import('../swarm/swarm-contract.js').UnitType[]} types the type table
  * @property {import('../swarm/swarm-contract.js').StatusSpec[]} [statuses] the status table, by Status index
+ * @property {(layout: import('../swarm/swarm-layout.js').SwarmLayout) => Uint8Array} [cost] the nav cost grid on the
+ *   swarm's bin grid (0 = blocked): the swarm's blocked cells
  * @property {(profile: string) => Partial<import('../swarm/swarm-layout.js').SwarmCaps>} caps pool sizes per heap profile
  */
 

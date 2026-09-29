@@ -264,8 +264,8 @@ The first implementation (M2) runs a subset of the chain, with the same determin
 | | Passes and features |
 |---|---|
 | **In v0** | Free-slot scan, shot spawn (projectiles), unit spawn, bins, steering, integrate, projectiles, resolve, contact, targeting (`nearest` only), outbound copy |
-| **Added in M2** | Pickups: drops, magnet, collection and the scrap carry ([below](#pickups-in-m2)). Area effects (circle and ring), statuses, knockback and events ([below](#effects-statuses-and-events-in-m2)). |
-| **Later** | Subgroup scans (v0 uses the workgroup-memory scan) and flow fields. Also: cone and capsule effects, enemy-team effects, Magnetized and Overheated behaviour, the other target policies, chains, and the density and threat maps. |
+| **Added in M2** | Pickups: drops, magnet, collection and the scrap carry ([below](#pickups-in-m2)). Area effects (circle and ring), statuses, knockback and events ([below](#effects-statuses-and-events-in-m2)). The player flow field, the blocked grid, wall sliding, and walls that stop shots ([below](#flow-fields-and-walls-in-m2)). |
+| **Later** | Subgroup scans (v0 uses the workgroup-memory scan) and the base field (Assault mode). Also: cone and capsule effects, enemy-team effects, Magnetized and Overheated behaviour, the other target policies, chains, and the density and threat maps. |
 
 - v0 dispatches over each pool's **capacity**. Indirect dispatch by high-water mark ([buffers](#buffers)) comes later.
 - Spawn groups already carry their CPU-computed request prefix ([slot allocation](#deterministic-slot-allocation)).
@@ -321,6 +321,20 @@ Scrap gems follow the determinism rules of the rest of the chain.
 - The fuller rule, folding the gems nearest PATCH together at the cap ([above](#pass-chain)), comes later.
 
 **After a swarm reset** the pools start empty. On the reset tick, SCRAPWAKE deposits the scrap it knew was outstanding (`scrapDropped − scrap` from the applied blocks), and it comes back as a merged gem near PATCH. Drops and pickups inside the discarded ticks are lost.
+
+### Flow fields and walls in M2
+
+The player field ([06: navigation](06-world.md#navigation)) shares the swarm's bin grid (128 × 128 cells of 2 m), so a unit's bin cell is also its field cell.
+
+**Blocked cells** are static game data. `SwarmTables.build` packs the nav cost grid into one bit per cell in `T` (`tBlocked`), and three passes use them:
+- **Integrate** slides against walls: the x step, then the y step, is refused (and that velocity component zeroed) if it would enter a blocked cell. A unit that spawned inside a wall can still walk out.
+- **Projectiles** die when they enter a blocked cell.
+- **Steering**, while a field is committed, follows the field's direction in the unit's cell (a binary angle, speed × cos/sin from the sine table). Within `FIELD_DIRECT` (about two cells) of the goal, or in a cell without a path, it seeks proxy 0 directly.
+
+**The `G` buffer** holds two fields (double-buffered, binding 8).
+- A tick that commits a field (the header's field-swap flag, with the words passed to `submit`) writes it into the other half. That tick and later ones read that half: the tick parameter `field` is 0, 1 or `FIELD_NONE`.
+- Commits are at least *L_field* ticks apart, more than the ticks a frame encodes, so a frame never overwrites a half that one of its earlier ticks still reads.
+- A swarm reset marks the field invalid until the next commit. SCRAPWAKE re-commits on the reset tick, so a replay that resets in place matches a live run on fresh buffers.
 
 ### Effects, statuses and events in M2
 

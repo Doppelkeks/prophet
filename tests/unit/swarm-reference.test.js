@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { EffectShape, EventClass, EventKind, ProxyFlag, Status, SwarmOutbound, Team } from '../../engine/swarm/swarm-contract.js';
 import { EVENT_WORDS, OH, OUT_MAGIC, SwarmLayout } from '../../engine/swarm/swarm-layout.js';
 import { SwarmHarness, TEST_TYPES } from '../support/swarm-harness.js';
+import { FlowField } from '../../engine/nav/sim/flow-field.js';
 
 const M = 1024; // one meter in Q10
 
@@ -361,6 +362,48 @@ test('report types emit UNIT_DIED events in canonical order; past the cap the cl
   block.set([7, 0, 0, 0, -1, 0, 0, 0, 7, 0, 0, -5], layout.L.oEvents);
   SwarmOutbound.canonicalize(layout, block);
   assert.deepEqual(Array.from(block.subarray(layout.L.oEvents, layout.L.oEvents + 3 * EVENT_WORDS)), [7, 0, 0, 0, 7, 0, 0, -5, -1, 0, 0, 0], 'words compare unsigned');
+});
+
+/** A 32 × 32 grid of 2 m cells (origin −32 m) with a wall at column 18 (x 4..6 m), rows 12..19 (y −8..8 m). */
+function walled() {
+  const cost = new Uint8Array(32 * 32).fill(1);
+  for (let cy = 12; cy < 20; cy++) cost[cy * 32 + 18] = 0;
+  return cost;
+}
+
+test('flow fields: without one a unit stalls at a wall; with one it goes around, never entering a blocked cell', () => {
+  const cost = walled();
+  const proxy = (/** @type {import('../../engine/swarm/swarm-contract.js').SwarmInbound} */ i) =>
+    i.proxy({ entity: 1, x: 10 * M, y: 0, radius: 512, team: Team.PLAYER });
+  const stuck = new SwarmHarness({}, { cost });
+  stuck.unit(0, -2 * M, 0, 1);
+  for (let t = 0; t < 400; t++) stuck.step(proxy);
+  assert.ok(stuck.pos(0)[0] < 4 * M, `straight seek stops at the wall (x ${stuck.pos(0)[0]})`);
+
+  const h = new SwarmHarness({}, { cost });
+  h.unit(0, -2 * M, 0, 1);
+  const field = new FlowField(32, 32).solve(cost, 16 * 32 + 21); // the proxy's cell: (21, 16)
+  let reached = -1;
+  for (let t = 0; t < 600 && reached < 0; t++) {
+    h.step((i) => {
+      proxy(i);
+      if (t === 0) i.setField(field);
+    });
+    const [x, y] = h.pos(0);
+    const [cx, cy] = h.cell(x, y);
+    assert.notEqual(cost[cy * 32 + cx], 0, `tick ${t}: inside a wall`);
+    if (Math.hypot(x - 10 * M, y) < 2 * M) reached = t;
+  }
+  assert.ok(reached > 0, 'reaches the proxy around the wall');
+});
+
+test('walls stop shots', () => {
+  const h = new SwarmHarness({}, { cost: walled() });
+  h.unit(0, 8 * M, 0, 0, 5000);
+  h.shot(0, { x: 2 * M, y: 0, vx: 600, vy: 0, dmg: 1000, life: 60 });
+  for (let t = 0; t < 20; t++) h.step();
+  assert.equal(h.shotAlive(0), false);
+  assert.equal(h.hp(0), 5000, 'the unit behind the wall was not hit');
 });
 
 /** A busy scene: rings of all types, a pushing player proxy that fires every tick. */

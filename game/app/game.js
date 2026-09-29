@@ -3,8 +3,9 @@
 // No DOM, GPU or clock in here.
 import { Units } from '../../engine/core/units.js';
 import { ACTOR_WORDS } from '../../engine/render/render-style.js';
-import { Abilities, Director, Gun, Health, Motion, Pilot, RunStats, Transform } from '../components/index.js';
-import { PATCH_SPEED } from '../data/arena.js';
+import { FlowField } from '../../engine/nav/sim/flow-field.js';
+import { Abilities, Director, Gun, Health, Motion, NavField, Pilot, RunStats, Transform } from '../components/index.js';
+import { ARENA_COST, L_FIELD, NAV, OBSTACLES, PATCH_SPEED } from '../data/arena.js';
 import { ACTOR_STYLE, RENDER_STYLE } from '../data/render-styles.js';
 import { SWARM_CAPS, SWARM_STATUSES, SWARM_TYPES } from '../data/swarm-types.js';
 import { HUD } from '../state/hud-state.js';
@@ -22,6 +23,13 @@ export const SCRAPWAKE = {
     seed: 0x5c4a9,
     types: SWARM_TYPES,
     statuses: SWARM_STATUSES,
+    cost(layout) {
+      const L = layout.L;
+      if (L.gridW !== NAV.w || L.cellShift !== NAV.shift || L.originX !== NAV.origin || L.originY !== NAV.origin) {
+        throw new Error('SCRAPWAKE: the swarm bin grid must be the nav grid (128 × 128 cells of 2 m, centered)');
+      }
+      return ARENA_COST;
+    },
     caps: (profile) => SWARM_CAPS[profile] ?? SWARM_CAPS.std,
   },
   render: {
@@ -44,14 +52,25 @@ export const SCRAPWAKE = {
         out[r + 4] = vy;
         out[r + 5] = i === 0 ? ACTOR_STYLE.PATCH_BODY : ACTOR_STYLE.PATCH_HEAD;
       }
-      return 2;
+      // The obstacles: static boxes centered on their rectangles.
+      for (let k = 0; k < OBSTACLES.length; k++) {
+        const o = OBSTACLES[k];
+        const r = (2 + k) * ACTOR_WORDS;
+        out[r] = (o.x * 2 + o.w) << 9; // center, Q10: (x + w / 2) m
+        out[r + 1] = (o.y * 2 + o.h) << 9;
+        out[r + 2] = 0;
+        out[r + 3] = 0;
+        out[r + 4] = 0;
+        out[r + 5] = o.kind === 'pillar' ? ACTOR_STYLE.PILLAR : o.kind === 'wallH' ? ACTOR_STYLE.WALL_H : ACTOR_STYLE.WALL_V;
+      }
+      return 2 + OBSTACLES.length;
     },
   },
 
   setup(sim) {
     const world = sim.world;
     if (world.archetype([Transform, Motion, Pilot, Health, Gun, Abilities]) !== ARCHETYPES.pilot) throw new Error('archetype order changed');
-    if (world.archetype([RunStats, Director]) !== ARCHETYPES.run) throw new Error('archetype order changed');
+    if (world.archetype([RunStats, Director, NavField]) !== ARCHETYPES.run) throw new Error('archetype order changed');
     const patch = world.spawn(ARCHETYPES.pilot);
     world.set(patch, Pilot.speed, PATCH_SPEED);
     world.add(patch, Health, [Units.q8(100), Units.q8(100)]);
@@ -60,8 +79,10 @@ export const SCRAPWAKE = {
     // The director never asks for more units than the pool holds (the replay header records the pool).
     const pool = sim.swarm ? sim.swarm.backend.layout.caps.units : 20000;
     world.add(run, Director, [Units.ticks(1), Units.ticks(1.5), 24, 6, Math.min(20000, pool), Units.q10(18), Units.q10(24), 0]);
+    world.add(run, NavField, [-1, -L_FIELD, 0, -1]); // no goal yet: the first request goes out on tick 0
     sim.resources.patch = patch;
     sim.resources.run = run;
+    sim.resources.flow = new FlowField(NAV.w, NAV.w); // the solver's scratch; the field it commits is sim state
   },
 
   extract(sim, hud, frame) {

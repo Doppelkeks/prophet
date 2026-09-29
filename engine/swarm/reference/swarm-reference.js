@@ -5,7 +5,7 @@
 // changes results.
 import { Hash32 } from '../../core/hash32.js';
 import { Rng } from '../../core/rng.js';
-import { IH, MISC } from '../swarm-layout.js';
+import { FIELD_NONE, IH, INFLAG, MISC } from '../swarm-layout.js';
 import { SwarmKeys, SwarmOutbound } from '../swarm-contract.js';
 import { BinCount } from './bin-count.js';
 import { BinScan } from './bin-scan.js';
@@ -68,14 +68,23 @@ export class SwarmReference {
     this.arrived = new Map();
     this.clock = 0;
     this.lastDue = 0;
+    /** Flow-field double buffer: the half committed last, and whether it holds a field. */
+    this.fieldSel = 0;
+    this.fieldValid = false;
     /** @type {((pass: string, b: SwarmBuffers) => void) | null} hook after every pass (per-pass diffs) */
     this.afterPass = null;
   }
 
-  /** @param {number} tick @param {Int32Array} inbound @param {number} prevFires */
-  submit(tick, inbound, prevFires) {
+  /** @param {number} tick @param {Int32Array} inbound @param {number} prevFires @param {Int32Array | null} [field] */
+  submit(tick, inbound, prevFires, field = null) {
     const b = this.b;
     const L = b.L;
+    if (inbound[IH.FLAGS] & INFLAG.RESET) this.fieldValid = false; // a reset swarm has no field until the next swap
+    if (field) {
+      this.fieldSel ^= 1;
+      b.G.set(field, this.fieldSel * L.cells);
+      this.fieldValid = true;
+    }
     const inBase = (tick % this.layout.caps.ticksInFlight) * L.inWords;
     b.I.set(inbound.subarray(0, L.inWords), inBase);
     /** @type {import('./swarm-buffers.js').TickParams} */
@@ -89,6 +98,7 @@ export class SwarmReference {
       effects: inbound[IH.EFFECTS],
       requests: inbound[IH.REQUESTS],
       flags: inbound[IH.FLAGS],
+      field: this.fieldValid ? this.fieldSel : FIELD_NONE,
     };
     this.runTick(p);
     this.clock++;

@@ -19,6 +19,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let W = i32(L.gridW);
   let cx = cellX(x);
   let cy = cellY(y);
+  if (blocked(cx, cy)) {
+    P[L.pInfo + s] = 0u; // walls stop shots
+    return;
+  }
   var bestD = 0x7fffffff;
   var best = 0xffffffffu;
   for (var oy = -1; oy <= 1; oy = oy + 1) {

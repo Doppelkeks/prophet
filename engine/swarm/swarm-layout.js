@@ -13,7 +13,8 @@
 //                                      area effects
 //   O  outbound block                  header, kills per type and source, proxy damage and scrap, fire-result
 //                                      bits, events
-//   T  tables                          sine table (Q14), type table, status table
+//   T  tables                          sine table (Q14), type table, status table, blocked-cell bits
+//   G  grids                           two flow-field buffers (double-buffered: the tick picks one)
 
 import { SIN_TABLE_SIZE } from '../core/sin-table.js';
 
@@ -38,6 +39,14 @@ export const STATUS_WORDS = 2; // status-table entry: tier durations, damage per
 export const STATUS_COUNT = 8;
 /** Status timers count steps of this many ticks (docs/BUDGETS.md#simulation-constants). */
 export const STATUS_STEP = 4;
+/** Inbound header flags. */
+export const INFLAG = Object.freeze({ RESET: 1, FIELD_SWAP: 2 });
+/** The tick's field selector when no field is valid (0 and 1 pick a buffer half). */
+export const FIELD_NONE = 2;
+/** Flow-field distance code of blocked and unreachable cells (engine/nav/sim/flow-field.js). */
+export const FIELD_NO_PATH = 0xffff;
+/** Within this field distance (about two cells) units seek proxy 0 directly: the field only knows its cell. */
+export const FIELD_DIRECT = 20;
 export const HEADER_WORDS = 16;
 
 /** Inbound header words. */
@@ -87,7 +96,7 @@ export const LAYOUT_FIELDS = /** @type {const} */ ([
   'outWords', 'oKillsType', 'oKillsSource', 'oProxyDmg', 'oFireBits', 'typeCap', 'sourceCap', 'scanBlocks',
   'tSin', 'tTypes', 'keySpawnA', 'keySpawnR', 'keyPhase', 'aScanTmp', 'keyDrop', 'pickCap',
   'kPosX', 'kPosY', 'kValue', 'kInfo', 'aDrop', 'aDropReq', 'aPickFree', 'oProxyScrap',
-  'inEffects', 'effectCap', 'oEvents', 'eventCap', 'tStatus', 'pad1', 'pad2', 'pad3',
+  'inEffects', 'effectCap', 'oEvents', 'eventCap', 'tStatus', 'tBlocked', 'pad2', 'pad3',
 ]);
 
 export class SwarmLayout {
@@ -212,11 +221,12 @@ export class SwarmLayout {
     L.tSin = 0;
     L.tTypes = SIN_TABLE_SIZE;
     L.tStatus = SIN_TABLE_SIZE + c.types * TYPE_WORDS;
+    L.tBlocked = L.tStatus + STATUS_COUNT * STATUS_WORDS; // one bit per bin cell (the flow field shares the bin grid)
     L.keySpawnA = 0;
     L.keySpawnR = 0;
     L.keyPhase = 0;
     L.keyDrop = 0;
-    L.pad1 = L.pad2 = L.pad3 = 0;
+    L.pad2 = L.pad3 = 0;
 
     /** Word offsets and sizes by name. */
     this.L = L;
@@ -227,7 +237,8 @@ export class SwarmLayout {
       A: a,
       I: L.inWords * c.ticksInFlight,
       O: L.outWords,
-      T: SIN_TABLE_SIZE + c.types * TYPE_WORDS + STATUS_COUNT * STATUS_WORDS,
+      T: SIN_TABLE_SIZE + c.types * TYPE_WORDS + STATUS_COUNT * STATUS_WORDS + ((cells + 31) >>> 5),
+      G: 2 * cells,
     };
   }
 
@@ -269,6 +280,9 @@ export class SwarmLayout {
       ['EVENT_WORDS', EVENT_WORDS],
       ['STATUS_WORDS', STATUS_WORDS],
       ['STATUS_STEP', STATUS_STEP],
+      ['FIELD_NONE', FIELD_NONE],
+      ['FIELD_NO_PATH', FIELD_NO_PATH],
+      ['FIELD_DIRECT', FIELD_DIRECT],
       ['SCAN_BLOCK', SCAN_BLOCK],
       ['OUT_MAGIC', OUT_MAGIC],
       ...Object.entries(IH).map(([k, v]) => /** @type {[string, number]} */ ([`IH_${k}`, v])),

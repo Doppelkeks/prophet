@@ -32,11 +32,11 @@ export class SwarmHarness {
   /**
    * @param {Partial<import('../../engine/swarm/swarm-layout.js').SwarmCaps>} [caps]
    * @param {{ seed?: number, shuffle?: number, delay?: (tick: number) => number, types?: import('../../engine/swarm/swarm-contract.js').UnitType[],
-   *   statuses?: import('../../engine/swarm/swarm-contract.js').StatusSpec[] }} [o]
+   *   statuses?: import('../../engine/swarm/swarm-contract.js').StatusSpec[], cost?: Uint8Array }} [o]
    */
   constructor(caps = {}, o = {}) {
     this.layout = new SwarmLayout({ units: 256, shots: 64, pickups: 64, groups: 8, fires: 32, proxies: 4, gridW: 32, arenaHalf: 32 * 1024, ...caps });
-    this.tables = SwarmTables.build(this.layout, o.types ?? TEST_TYPES, o.statuses ?? TEST_STATUSES);
+    this.tables = SwarmTables.build(this.layout, o.types ?? TEST_TYPES, o.statuses ?? TEST_STATUSES, o.cost ?? null);
     this.ref = new SwarmReference(this.layout, this.tables, { seed: o.seed ?? 1234, shuffle: o.shuffle, delay: o.delay });
     this.inbound = new SwarmInbound(this.layout);
     this.tick = 0;
@@ -54,7 +54,7 @@ export class SwarmHarness {
   step(build) {
     this.inbound.reset();
     build?.(this.inbound);
-    this.ref.submit(this.tick, this.inbound.finish(this.tick), this.prevFires);
+    this.ref.submit(this.tick, this.inbound.finish(this.tick), this.prevFires, this.inbound.field);
     this.prevFires = this.inbound.fires;
     const block = this.ref.take(this.tick);
     this.tick++;
@@ -145,6 +145,11 @@ export class SwarmHarness {
   /** Kills unit `s` in this tick's resolve (its damage accumulator). @param {number} s */
   doom(s) {
     this.ref.b.A[this.ref.b.L.aDmg + s] = 0x3fffffff;
+  }
+
+  /** The bin cell of a position, as [cx, cy]. @param {number} x @param {number} y */
+  cell(x, y) {
+    return [SwarmMath.cellX(this.L, x), SwarmMath.cellY(this.L, y)];
   }
 
   /** Live units. */

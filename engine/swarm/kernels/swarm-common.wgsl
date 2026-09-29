@@ -15,7 +15,7 @@ struct TickParams {
   requests: u32,
   flags: u32,
   effects: u32,
-  pad0: u32,
+  field: u32,
   pad1: u32,
   pad2: u32,
 }
@@ -36,6 +36,7 @@ struct TickParams {
 @group(0) @binding(6) var<storage, read_write> O: array<i32>;
 #endif
 @group(0) @binding(7) var<storage, read> T: array<i32>;
+@group(0) @binding(8) var<storage, read> G: array<i32>;
 
 override WG: u32 = 64u;
 
@@ -74,3 +75,8 @@ fn scaleTo(dx: i32, dy: i32, len: i32) -> vec2<i32> {
 }
 
 fn typeWord(info: u32, w: u32) -> i32 { return T[L.tTypes + (info & 0xffu) * TYPE_WORDS + w]; }
+
+fn blocked(cx: i32, cy: i32) -> bool {
+  let c = u32(cy * i32(L.gridW) + cx);
+  return ((bitcast<u32>(T[L.tBlocked + (c >> 5u)]) >> (c & 31u)) & 1u) != 0u;
+}

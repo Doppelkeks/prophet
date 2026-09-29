@@ -1,11 +1,13 @@
 // @ts-check
 // Pass 8: steering. Seek toward proxy 0, separation from the 3×3 bin neighbourhood, soft push from
 // pushing proxies. Writes only the unit's own velocity; every term is an order-independent integer sum
-// (docs/engine/05-gpu-swarm.md#pass-chain). Slowed units steer at half speed; stunned ones don't seek.
+// (docs/engine/05-gpu-swarm.md#pass-chain). With a flow field, the seek follows the field's direction in
+// the unit's cell until it is within FIELD_DIRECT of the goal (or its cell has no path), then heads straight
+// for proxy 0. Slowed units steer at half speed; stunned ones don't seek.
 // Knockback above the speed limit is not clipped: it decays through the velocity smoothing.
 // Twin: kernels/steer.wgsl.
 import { Fixed } from '../../core/fixed.js';
-import { PROXY_WORDS, TY, TYPE_WORDS, UNIT_ALIVE } from '../swarm-layout.js';
+import { FIELD_DIRECT, FIELD_NONE, FIELD_NO_PATH, PROXY_WORDS, TY, TYPE_WORDS, UNIT_ALIVE } from '../swarm-layout.js';
 import { ProxyFlag } from '../swarm-contract.js';
 import { SwarmMath } from './swarm-math.js';
 
@@ -93,7 +95,17 @@ export class Steer {
         const q = proxies + k * PROXY_WORDS;
         const qx = b.I[q + 1];
         const qy = b.I[q + 2];
-        if (k === 0 && !stunned) SwarmMath.scaleTo(qx - x, qy - y, spd, seek);
+        if (k === 0 && !stunned) {
+          const word = p.field === FIELD_NONE ? 0 : b.G[Math.imul(p.field, L.cells) + Math.imul(cy, W) + cx];
+          const dist = word >>> 16;
+          if (dist !== FIELD_NO_PATH && dist > FIELD_DIRECT) {
+            const a = word & 0xffff;
+            seek[0] = Fixed.mulShr(spd, Fixed.cosB(a), 14);
+            seek[1] = Fixed.mulShr(spd, Fixed.sinB(a), 14);
+          } else {
+            SwarmMath.scaleTo(qx - x, qy - y, spd, seek);
+          }
+        }
         if (((b.I[q + 4] >>> 16) & ProxyFlag.PUSHES) === 0) continue;
         const r = b.I[q + 3] + ri;
         const dx = x - qx;

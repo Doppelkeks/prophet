@@ -1,6 +1,7 @@
-// Pass 8: seek toward proxy 0, separation from the 3×3 bins, soft push from pushing proxies. Writes only
-// the unit's own velocity. Slowed units steer at half speed, stunned ones don't seek, and knockback above
-// the limit decays instead of being clipped. Twin: engine/swarm/reference/steer.js.
+// Pass 8: seek toward proxy 0 (along the flow field while one is committed and the goal is far), separation
+// from the 3×3 bins, soft push from pushing proxies. Writes only the unit's own velocity. Slowed units steer
+// at half speed, stunned ones don't seek, and knockback above the limit decays instead of being clipped.
+// Twin: engine/swarm/reference/steer.js.
 #include "swarm-common.wgsl"
 
 @compute @workgroup_size(WG)
@@ -81,7 +82,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let q = proxies + k * PROXY_WORDS;
     let qx = I[q + 1u];
     let qy = I[q + 2u];
-    if (k == 0u && !stunned) { seek = scaleTo(qx - x, qy - y, spd); }
+    if (k == 0u && !stunned) {
+      var word = 0u;
+      if (TP.field != FIELD_NONE) { word = bitcast<u32>(G[TP.field * L.cells + u32(cy * W + cx)]); }
+      let dist = word >> 16u;
+      if (dist != FIELD_NO_PATH && dist > FIELD_DIRECT) {
+        let a = word & 0xffffu;
+        seek = vec2<i32>(fx_mulShr(spd, fx_cosB(a), 14u), fx_mulShr(spd, fx_sinB(a), 14u));
+      } else {
+        seek = scaleTo(qx - x, qy - y, spd);
+      }
+    }
     if (((bitcast<u32>(I[q + 4u]) >> 16u) & PROXY_PUSHES) == 0u) { continue; }
     let r = I[q + 3u] + ri;
     let dx = x - qx;

@@ -100,7 +100,8 @@ test('a device loss becomes a logged swarm reset: the stalled tick resumes on a 
 
   // Recovery: a fresh swarm (new buffers) and a reset logged on the stalled tick.
   const layout = link.backend.layout;
-  link.backend = new SwarmReference(layout, SwarmTables.build(layout, SCRAPWAKE.swarm?.types ?? []), { seed: SCRAPWAKE.swarm?.seed ?? 0 });
+  const gs = /** @type {import('../../engine/app/game-module.js').GameSwarm} */ (SCRAPWAKE.swarm);
+  link.backend = new SwarmReference(layout, SwarmTables.build(layout, gs.types, gs.statuses, gs.cost?.(layout) ?? null), { seed: gs.seed });
   sim.requestSwarmReset();
   assert.equal(sim.log.uiCount(sim.tick), 1);
   assert.equal(sim.log.uiWords[sim.log.uiAt(sim.tick)], EngineCommand.SWARM_RESET);

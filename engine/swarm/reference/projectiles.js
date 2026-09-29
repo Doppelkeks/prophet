@@ -34,6 +34,10 @@ export class Projectiles {
     const last = b.P[L.pLastHit + s];
     const cx = SwarmMath.cellX(L, x);
     const cy = SwarmMath.cellY(L, y);
+    if (SwarmMath.blocked(L, b.T, cx, cy)) {
+      b.P[L.pInfo + s] = 0; // walls stop shots
+      return;
+    }
     let bestD = 0x7fffffff;
     let best = -1;
     for (let oy = -1; oy <= 1; oy++) {

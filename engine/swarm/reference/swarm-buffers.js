@@ -12,7 +12,8 @@
  * @property {number} proxies
  * @property {number} effects
  * @property {number} requests units requested by this tick's spawn groups
- * @property {number} flags bit 0: swarm reset
+ * @property {number} flags bit 0: swarm reset, bit 1: field swap
+ * @property {number} field the flow-field half this tick reads (0 or 1), or FIELD_NONE
  */
 
 export class SwarmBuffers {
@@ -34,5 +35,6 @@ export class SwarmBuffers {
     this.I = new Int32Array(w.I);
     this.O = new Int32Array(w.O);
     this.T = tables;
+    this.G = new Int32Array(w.G);
   }
 }

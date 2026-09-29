@@ -5,7 +5,7 @@ import { Units } from '../../engine/core/units.js';
 import { ARENA_HALF } from './arena.js';
 
 /** Actor styles, by the record's style word. */
-export const ACTOR_STYLE = Object.freeze({ PATCH_BODY: 0, PATCH_HEAD: 1 });
+export const ACTOR_STYLE = Object.freeze({ PATCH_BODY: 0, PATCH_HEAD: 1, PILLAR: 2, WALL_H: 3, WALL_V: 4 });
 
 /** @type {import('../../engine/render/render-style.js').RenderStyle} */
 export const RENDER_STYLE = {
@@ -21,6 +21,9 @@ export const RENDER_STYLE = {
   actors: [
     { w: 6, d: 4, h: 14, top: 'rust-700', front: 'rust-700' }, // PATCH: chassis
     { w: 6, d: 4, h: 6, z: 14, top: 'concrete-400', front: 'sodium-500' }, // PATCH: head, the optic facing the camera
+    { w: 32, d: 32, h: 24, top: 'concrete-400', front: 'concrete-600' }, // pillar: 4 × 4 × 3 m
+    { w: 128, d: 16, h: 16, top: 'concrete-400', front: 'concrete-600' }, // wall along x: 16 × 2 × 2 m
+    { w: 16, d: 128, h: 16, top: 'concrete-400', front: 'concrete-600' }, // wall along y
   ],
   shot: { w: 2, d: 1, h: 1, z: 8, top: 'sodium-500', front: 'amber-400' },
   pickup: { w: 2, d: 2, h: 2, z: 1, top: 'amber-400', front: 'rust-700' }, // scrap gems: amber (docs/game/03-art-audio.md#palette)
