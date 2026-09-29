@@ -4,7 +4,11 @@
 
 **SCRAPWAKE** is its first game: a roguelite that crosses Vampire Survivors with tower defence, set in a fully destructible voxel cyberpunk city. You play a broken robot that rebuilds itself from the scrap it finds.
 
-> **Status: M1 in progress.** The engine foundation is being built increment by increment on top of the M0 concept docs, which remain the contract ([ROADMAP](docs/ROADMAP.md)). The first target is a playable tech demo: PATCH against a GPU swarm, in the browser and in Electron.
+> **Status: M1–M2 foundation in place.** The engine is built increment by increment on top of the M0 concept docs, which remain the contract ([ROADMAP](docs/ROADMAP.md)). The tech demo plays in the browser and in Electron, from source or from the production bundle:
+> - PATCH against a GPU swarm, bit-exact with its JS reference.
+> - Pixel-exact oblique rendering.
+> - Replays that reproduce a GPU run in Node.
+> - Device-loss recovery.
 
 ---
 
