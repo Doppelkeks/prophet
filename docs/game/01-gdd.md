@@ -349,7 +349,7 @@ The director is the CPU system that turns minute tables into spawns. It is deter
 **Inputs.**
 - The district's **minute table**: featured units and weights, spawn budget *B(t)*, alive band, specialist caps, elite schedule, events.
 - PATCH state (HP %, level versus expected), Forge HP %, bank size, recent damage.
-- The GPU's low-resolution **density and threat maps** ([CPU-GPU contract](../engine/05-gpu-swarm.md#cpu-gpu-contract)). They place spawns, measure local pressure on PATCH, and drive music intensity and off-screen threat arrows.
+- The GPU's low-resolution **density and threat maps** ([CPU-GPU contract](../engine/05-gpu-swarm.md#cpu-gpu-contract)). They place spawns, measure local pressure on PATCH, and drive music intensity and off-screen threat arrows. The M2 tech demo already uses the pressure reading: it holds the next wave while the threat points within 12 m of PATCH exceed a cap per stress level.
 
 **Rules.**
 1. **Budget.** Each second the director receives *B(t) × I* threat points (TP) for roaming spawns and spends them on the minute table's mix. It keeps the alive count inside a band: below the floor it spawns up to 2× faster, above the ceiling it pauses.

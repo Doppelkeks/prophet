@@ -5,6 +5,7 @@
 //   type is immune. Tiers arrive as OR-ed unary codes, so the highest tier wins in any order.
 // - Marked units take 25 % more hit damage.
 // - Impulses (knockback) add to the velocity, scaled by the type's knockback resistance (255 = anchored).
+// - Survivors count into the density and threat maps (8 m cells), a commuting reduction.
 // - Deaths clear the alive flag, bump the kill counters per type and per credited source, may drop scrap
 //   (rand(DROP, tick, slot) against the type's chance), and report types emit a UNIT_DIED event.
 // Twin: kernels/resolve.wgsl.
@@ -74,6 +75,12 @@ export class Resolve {
       b.Ui[L.uHp + i] = hp;
       if (hp > 0) {
         b.O[OH.UNITS_ALIVE]++;
+        const last = L.mapW - 1;
+        const mx = Fixed.clamp((b.Ui[L.uPosX + i] - L.originX) >> L.mapShift, 0, last);
+        const my = Fixed.clamp((b.Ui[L.uPosY + i] - L.originY) >> L.mapShift, 0, last);
+        const m = Math.imul(my, L.mapW) + mx;
+        b.O[L.oDensity + m]++;
+        b.O[L.oThreat + m] += flags >>> 16;
         continue;
       }
       b.U[L.uInfo + i] = (info & ~UNIT_ALIVE) >>> 0;

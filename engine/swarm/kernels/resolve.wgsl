@@ -1,6 +1,7 @@
 // Pass 11: applies and clears each unit's accumulators: status timers (step damage, then this tick's tiers),
-// Marked's extra damage, knockback, deaths with kill counters, scrap drops (rand(DROP, tick, slot) against
-// the type's chance) and UNIT_DIED events for report types. Twin: engine/swarm/reference/resolve.js.
+// Marked's extra damage, knockback, the density and threat maps for survivors, deaths with kill counters,
+// scrap drops (rand(DROP, tick, slot) against the type's chance) and UNIT_DIED events for report types.
+// Twin: engine/swarm/reference/resolve.js.
 #define O_ATOMIC
 #include "swarm-common.wgsl"
 
@@ -79,6 +80,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   U[L.uHp + i] = bitcast<u32>(hp);
   if (hp > 0) {
     atomicAdd(&O[OH_UNITS_ALIVE], 1);
+    let last = i32(L.mapW) - 1;
+    let mx = clamp((bitcast<i32>(U[L.uPosX + i]) - bitcast<i32>(L.originX)) >> L.mapShift, 0, last);
+    let my = clamp((bitcast<i32>(U[L.uPosY + i]) - bitcast<i32>(L.originY)) >> L.mapShift, 0, last);
+    let m = u32(my) * L.mapW + u32(mx);
+    atomicAdd(&O[L.oDensity + m], 1);
+    atomicAdd(&O[L.oThreat + m], i32(flags >> 16u));
     return;
   }
   U[L.uInfo + i] = info & ~UNIT_ALIVE;

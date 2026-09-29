@@ -4,9 +4,10 @@
 import { Units } from '../../engine/core/units.js';
 import { ACTOR_WORDS } from '../../engine/render/render-style.js';
 import { FlowField } from '../../engine/nav/sim/flow-field.js';
-import { Abilities, Director, Gun, Health, Motion, NavField, Pilot, RunStats, Transform } from '../components/index.js';
+import { Abilities, Arc, Director, Gun, Health, Motion, NavField, Pilot, RunStats, Transform } from '../components/index.js';
 import { ARENA_COST, L_FIELD, NAV, OBSTACLES, PATCH_SPEED } from '../data/arena.js';
 import { ACTOR_STYLE, RENDER_STYLE } from '../data/render-styles.js';
+import { ARC_SOURCE } from '../data/abilities.js';
 import { SWARM_CAPS, SWARM_STATUSES, SWARM_TYPES } from '../data/swarm-types.js';
 import { HUD } from '../state/hud-state.js';
 import { ARCHETYPES } from './archetypes.js';
@@ -69,12 +70,14 @@ export const SCRAPWAKE = {
 
   setup(sim) {
     const world = sim.world;
-    if (world.archetype([Transform, Motion, Pilot, Health, Gun, Abilities]) !== ARCHETYPES.pilot) throw new Error('archetype order changed');
+    if (world.archetype([Transform, Motion, Pilot, Health, Gun, Abilities, Arc]) !== ARCHETYPES.pilot) throw new Error('archetype order changed');
     if (world.archetype([RunStats, Director, NavField]) !== ARCHETYPES.run) throw new Error('archetype order changed');
     const patch = world.spawn(ARCHETYPES.pilot);
     world.set(patch, Pilot.speed, PATCH_SPEED);
     world.add(patch, Health, [Units.q8(100), Units.q8(100)]);
     world.add(patch, Gun, [0, Units.ticks(0.1), Units.q10(14), Units.q8(1.5), Units.q10PerTick(30), Units.ticks(0.7), 1, 0]);
+    // The Arc Welder: 1.4 chains a second over 8 m, jumping to 2 more targets at −30 % each.
+    world.add(patch, Arc, [0, Units.ticks(1 / 1.4), Units.q10(8), Units.q8(2), 2, Units.q12(0.7) >> 4, ARC_SOURCE]);
     const run = world.spawn(ARCHETYPES.run);
     // The director never asks for more units than the pool holds (the replay header records the pool).
     const pool = sim.swarm ? sim.swarm.backend.layout.caps.units : 20000;
@@ -100,6 +103,7 @@ export const SCRAPWAKE = {
     hud.set(I.stompCd, world.get(patch, Abilities.stompCd));
     hud.set(I.elites, world.get(run, RunStats.elites));
     hud.set(I.taints, sim.taints);
+    hud.set(I.threat, world.get(run, RunStats.threat));
     hud.set(I.kills, world.get(run, RunStats.kills));
     hud.set(I.alive, world.get(run, RunStats.alive));
     hud.set(I.shots, world.get(run, RunStats.shots));

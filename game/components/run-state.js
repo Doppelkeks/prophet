@@ -6,7 +6,7 @@ export class RunStats extends Component {
   static key = 'run-stats';
   static schema = /** @type {const} */ ({
     kills: 'i32', fired: 'i32', rejected: 'i32', damage: 'i32', downs: 'i32', alive: 'i32', shots: 'i32', waves: 'i32',
-    scrap: 'i32', scrapDropped: 'i32', elites: 'i32',
+    scrap: 'i32', scrapDropped: 'i32', elites: 'i32', threat: 'i32',
   });
   /** @type {number} */ static kills;
   /** @type {number} */ static fired;
@@ -22,6 +22,8 @@ export class RunStats extends Component {
   /** @type {number} */ static scrapDropped;
   /** Elite kills, from the swarm's UNIT_DIED events. */
   /** @type {number} */ static elites;
+  /** Threat points within 12 m of PATCH, from the swarm's threat map (at T − K). */
+  /** @type {number} */ static threat;
 }
 
 /** Wave pacing: a ring of `count` units every `every` ticks, growing by `growth` per wave, up to `cap` alive. */

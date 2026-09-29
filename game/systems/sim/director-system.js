@@ -2,10 +2,12 @@
 import { Fixed } from '../../../engine/core/fixed.js';
 import { System } from '../../../engine/ecs/system.js';
 import { Director, RunStats, Transform } from '../../components/index.js';
+import { THREAT_CAP } from '../../data/abilities.js';
 
 /**
  * Decides WHEN and WHAT spawns (the GPU decides where exactly): a ring of units around PATCH every
- * wave, growing each wave, throttled by the alive count reported at T − K.
+ * wave, growing each wave, throttled by the alive count reported at T − K. While the threat around PATCH
+ * (the swarm's threat map) is at the cap, the wave waits half a second.
  */
 export class DirectorSystem extends System {
   static key = 'director';
@@ -22,6 +24,10 @@ export class DirectorSystem extends System {
     if (tick < reader.get(d, Director.next)) return;
     const waves = reader.get(d, RunStats.waves);
     const stress = reader.get(d, Director.stress);
+    if (reader.get(d, RunStats.threat) >= Math.imul(THREAT_CAP, 1 + stress)) {
+      cmd.set(d, Director.next, tick + 30);
+      return;
+    }
     const base = reader.get(d, Director.count) + Math.imul(waves, reader.get(d, Director.growth));
     const count = Math.imul(base, 1 + stress);
     const room = reader.get(d, Director.cap) - reader.get(d, RunStats.alive);

@@ -8,7 +8,9 @@ import { SwarmReference } from '../../engine/swarm/reference/swarm-reference.js'
 import { SCRAPWAKE } from '../../game/app/game.js';
 import { Abilities, Motion } from '../../game/components/index.js';
 import { PATCH_SPEED } from '../../game/data/arena.js';
-import { OVERCLOCK, STOMP } from '../../game/data/abilities.js';
+import { ARC_SOURCE, OVERCLOCK, STOMP } from '../../game/data/abilities.js';
+import { Policy } from '../../engine/swarm/swarm-contract.js';
+import { FIRE_WORDS } from '../../engine/swarm/swarm-layout.js';
 
 async function boot() {
   return SimBoot.create({
@@ -56,5 +58,26 @@ test('Overclock: the meter fills; a fresh press with a full meter pulses once an
   for (let t = 0; t < OVERCLOCK.duration; t++) await tick(sim, 0);
   await tick(sim, 0, 127);
   assert.equal(sim.world.get(patch, Motion.vx), PATCH_SPEED, 'and back after 5 s');
+  await b.jobs.shutdown();
+});
+
+test('the Arc Welder issues a CHAIN command 1.4 times a second: 2 jumps at −30 % each', async () => {
+  const b = await boot();
+  const sim = b.sim;
+  let chains = 0;
+  for (let t = 0; t < 120; t++) {
+    await tick(sim, 0);
+    const inbound = /** @type {import('../../engine/swarm/swarm-contract.js').SwarmInbound} */ (sim.resources.swarm);
+    const L = inbound.layout.L;
+    for (let k = 0; k < inbound.fires; k++) {
+      const at = L.inFires + k * FIRE_WORDS;
+      if (((inbound.block[at] >>> 16) & 0xff) !== Policy.CHAIN) continue;
+      chains++;
+      assert.equal(inbound.block[at] & 0xffff, ARC_SOURCE);
+      assert.equal((inbound.block[at + 7] >>> 16) & 0xff, 2, 'two jumps');
+      assert.equal(inbound.block[at + 1] & 0x1ff, 179, '−30 % per jump (Q8)');
+    }
+  }
+  assert.ok(chains === 2 || chains === 3, `${chains} chains in two seconds`);
   await b.jobs.shutdown();
 });

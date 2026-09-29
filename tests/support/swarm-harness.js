@@ -11,9 +11,9 @@ import { SwarmMath } from '../../engine/swarm/reference/swarm-math.js';
  * Q10 m per tick, Q10 m, Q8 HP; drop chance Q16.
  */
 export const TEST_TYPES = [
-  { speed: 55, radius: 358, maxHp: 768, contact: 256, interval: 10, dropChance: 32768, dropValue: 1 },
-  { speed: 82, radius: 256, maxHp: 256, contact: 128, interval: 20, immune: 1 << Status.STUNNED },
-  { speed: 34, radius: 614, maxHp: 3072, contact: 768, interval: 45, dropChance: 65536, dropValue: 5, flags: UnitFlag.REPORT, knockback: 192 },
+  { speed: 55, radius: 358, maxHp: 768, contact: 256, interval: 10, dropChance: 32768, dropValue: 1, threat: 1 },
+  { speed: 82, radius: 256, maxHp: 256, contact: 128, interval: 20, immune: 1 << Status.STUNNED, threat: 1 },
+  { speed: 34, radius: 614, maxHp: 3072, contact: 768, interval: 45, dropChance: 65536, dropValue: 5, flags: UnitFlag.REPORT, knockback: 192, threat: 4 },
 ];
 
 /** Test status table: durations per tier in steps of 4 ticks, damage per step (Q8). */

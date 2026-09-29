@@ -14,6 +14,7 @@ export const HUD = new StateSchema({
   stompCd: 'u32', // ticks until the stomp is ready
   elites: 'u32', // Brutes killed (UNIT_DIED events)
   taints: 'u32', // swarm blocks with lost events (the run no longer replays exactly)
+  threat: 'u32', // threat points within 12 m of PATCH
   hpMax: 'i32', // Q8
   kills: 'u32',
   alive: 'u32', // swarm units alive (reported at T − K)

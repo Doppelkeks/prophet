@@ -6,7 +6,7 @@ import '/engine/core/dev-global.js';
 import { GpuDevice } from '/engine/gpu/gpu-device.js';
 import { Swarm } from '/engine/swarm/swarm.js';
 import { SwarmLayout } from '/engine/swarm/swarm-layout.js';
-import { EffectShape, ProxyFlag, Status, SwarmInbound, SwarmOutbound, SwarmTables, Team } from '/engine/swarm/swarm-contract.js';
+import { EffectShape, FireFlag, Policy, ProxyFlag, Status, SwarmInbound, SwarmOutbound, SwarmTables, Team } from '/engine/swarm/swarm-contract.js';
 import { PASSES, SwarmReference } from '/engine/swarm/reference/swarm-reference.js';
 import { TEST_STATUSES, TEST_TYPES } from '/tests/support/swarm-harness.js';
 import { FlowField } from '/engine/nav/sim/flow-field.js';
@@ -67,8 +67,13 @@ const SCENES = {
       i.effect({ x: -px, y: 3 * M, radius: 4 * M, status: Status.MARKED, tier: 1 });
       i.effect({ x: 5 * M, y: -5 * M, radius: 3 * M, impulse: -200, status: Status.SLOWED, tier: 3 });
     }
+    // Every policy: nearest, strongest, chain (3 jumps, −30 % each), aimed; some prefer marked units.
+    const policies = [Policy.NEAREST, Policy.STRONGEST, Policy.CHAIN, Policy.AIMED];
     for (let f = 0; f < 12; f++) {
-      i.fire({ source: f, x: px + (f - 6) * 300, y: py, range: (8 + (f % 6)) * M, damage: 300 + f * 50, speed: 500 + f * 20, life: 40, pierce: f % 3 });
+      i.fire({
+        source: f, x: px + (f - 6) * 300, y: py, range: (8 + (f % 6)) * M, damage: 300 + f * 50, speed: 500 + f * 20, life: 40, pierce: f % 3,
+        policy: policies[f % 4], flags: f % 3 === 0 ? FireFlag.PREFER_MARKED : 0, aim: (t * 1500 + f * 5461) & 0xffff, bounces: 3, falloff: 179,
+      });
     }
     if (t === 200) i.requestReset();
   },
@@ -82,7 +87,7 @@ const SCENES = {
     if (t % 2 === 1) {
       for (let e = 0; e < 16; e++) i.effect({ x: ((e % 4) - 2) * 20 * M, y: (Math.floor(e / 4) - 2) * 20 * M, radius: 10 * M, damage: 60, impulse: 200, status: Status.STUNNED, tier: 2, source: e });
     }
-    for (let f = 0; f < 64; f++) i.fire({ source: f, x: (f - 32) * M, y: 0, range: 12 * M, damage: 400, speed: 600, life: 30, pierce: 1 });
+    for (let f = 0; f < 64; f++) i.fire({ source: f, x: (f - 32) * M, y: 0, range: 12 * M, damage: 400, speed: 600, life: 30, pierce: 1, policy: f % 5 === 0 ? Policy.CHAIN : f % 5 === 1 ? Policy.STRONGEST : Policy.NEAREST, bounces: 8, falloff: 200 });
   },
 };
 

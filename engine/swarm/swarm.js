@@ -6,7 +6,8 @@
 import { ReadbackRing } from '../gpu/readback-ring.js';
 import { PipelineCache } from '../gpu/pipeline-cache.js';
 import { WgslPreprocessor } from '../gpu/wgsl-preprocessor.js';
-import { EffectShape, EventClass, EventKind, MAX_IMPULSE, ProxyFlag, SwarmKeys, SwarmOutbound, Team, UnitFlag } from './swarm-contract.js';
+import { EffectShape, EventClass, EventKind, FireFlag, MAX_IMPULSE, Policy, ProxyFlag, SwarmKeys, SwarmOutbound, Team, UnitFlag } from './swarm-contract.js';
+import { MARK_PENALTY } from './reference/targeting.js';
 import { FIELD_NONE, IH, INFLAG, LAYOUT_FIELDS, SwarmLayout } from './swarm-layout.js';
 import { CARRY_OFFSET } from './reference/pickup-spawn.js';
 import { MAGNET_SPEED, PICKUP_RADIUS } from './reference/pickups.js';
@@ -132,6 +133,11 @@ export class Swarm {
         EVENT_CLASS_GAMEPLAY: EventClass.GAMEPLAY,
         UNIT_REPORT: UnitFlag.REPORT,
         MAX_IMPULSE,
+        MARK_PENALTY,
+        POLICY_STRONGEST: Policy.STRONGEST,
+        POLICY_AIMED: Policy.AIMED,
+        POLICY_CHAIN: Policy.CHAIN,
+        FIRE_PREFER_MARKED: FireFlag.PREFER_MARKED,
       });
     const code = async (/** @type {string} */ name) => header + (await pre.process(`${KERNELS}${name}.wgsl`));
     const WG = this.wg;

@@ -2,8 +2,9 @@
 // hand-placed scenes, plus shuffle invariance and a golden hash.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EffectShape, EventClass, EventKind, ProxyFlag, Status, SwarmOutbound, Team } from '../../engine/swarm/swarm-contract.js';
-import { EVENT_WORDS, OH, OUT_MAGIC, SwarmLayout } from '../../engine/swarm/swarm-layout.js';
+import { EffectShape, EventClass, EventKind, FireFlag, Policy, ProxyFlag, Status, SwarmOutbound, Team } from '../../engine/swarm/swarm-contract.js';
+import { EVENT_WORDS, OH, OUT_MAGIC, REQ_WORDS, SwarmLayout } from '../../engine/swarm/swarm-layout.js';
+import { SwarmMath } from '../../engine/swarm/reference/swarm-math.js';
 import { SwarmHarness, TEST_TYPES } from '../support/swarm-harness.js';
 import { FlowField } from '../../engine/nav/sim/flow-field.js';
 
@@ -404,6 +405,64 @@ test('walls stop shots', () => {
   for (let t = 0; t < 20; t++) h.step();
   assert.equal(h.shotAlive(0), false);
   assert.equal(h.hp(0), 5000, 'the unit behind the wall was not hit');
+});
+
+/** The velocity of fire command `k`'s shot request (after the tick that issued it), or null if it has none. @param {SwarmHarness} h @param {number} k */
+function request(h, k) {
+  const b = h.ref.b;
+  const r = b.L.aReq + k * REQ_WORDS;
+  return b.A[r] ? [SwarmMath.lo16(b.A[r + 3]), SwarmMath.hi16(b.A[r + 3])] : null;
+}
+
+test('targeting policies: STRONGEST picks the most HP (ties to the lower slot), PREFER_MARKED ranks marked units first, AIMED fires blind', () => {
+  const setup = () => {
+    const h = new SwarmHarness();
+    h.unit(3, 5 * M, 0, 0, 900);
+    h.unit(1, 0, 5 * M, 0, 900);
+    h.unit(2, -3 * M, 0, 0, 500);
+    return h;
+  };
+  const cmd = { source: 0, x: 0, y: 0, range: 8 * M, damage: 100, speed: 400, life: 30 };
+  const near = setup();
+  near.step((i) => i.fire(cmd));
+  assert.deepEqual(request(near, 0), [-400, 0], 'nearest: the unit at 3 m');
+  const strong = setup();
+  strong.step((i) => i.fire({ ...cmd, policy: Policy.STRONGEST }));
+  assert.deepEqual(request(strong, 0), [0, 400], 'strongest: slot 1 (900 HP, lower slot than 3)');
+  const marked = setup();
+  marked.step((i) => i.effect({ x: 5 * M, y: 0, radius: M, status: Status.MARKED, tier: 1 }));
+  marked.step((i) => i.fire({ ...cmd, flags: FireFlag.PREFER_MARKED }));
+  assert.deepEqual(request(marked, 0), [400, 0], 'the marked unit at 5 m beats the nearest');
+  const blind = new SwarmHarness();
+  const out = blind.step((i) => i.fire({ ...cmd, policy: Policy.AIMED, aim: 16384 }));
+  assert.deepEqual(request(blind, 0), [0, 400], 'aimed north with nothing there');
+  assert.equal(out?.fireResult(0), true);
+});
+
+test('chain lightning strikes its pick, then jumps within 3 m to units it has not hit, the damage falling off per jump', () => {
+  const h = new SwarmHarness();
+  for (const [s, x] of [[4, 4], [5, 6], [6, 8], [7, 12]]) h.unit(s, x * M, 0, 0, 100000);
+  const out = /** @type {SwarmOutbound} */ (
+    h.step((i) => i.fire({ source: 9, x: 0, y: 0, range: 5 * M, damage: 1000, speed: 400, life: 30, policy: Policy.CHAIN, bounces: 4, falloff: 128 }))
+  );
+  const dmg = (/** @type {number} */ s) => h.ref.b.A[h.L.aDmg + s];
+  assert.deepEqual([dmg(4), dmg(5), dmg(6), dmg(7)], [1000, 500, 250, 0], 'three hits, halving; the unit 4 m away is out of jump range');
+  assert.equal(request(h, 0), null, 'a chain fires no shot');
+  assert.equal(out.fireResult(0), true);
+  h.step();
+  assert.deepEqual([h.hp(4), h.hp(5), h.hp(6)], [99000, 99500, 99750], 'applied by the next resolve');
+});
+
+test('density and threat maps count the survivors per 8 m cell', () => {
+  const h = new SwarmHarness();
+  for (let s = 0; s < 5; s++) h.unit(s, 1 * M + s * 256, 1 * M, s < 3 ? 0 : 2);
+  h.unit(9, -20 * M, -20 * M);
+  const out = /** @type {SwarmOutbound} */ (h.step());
+  const L = h.L;
+  const cell = (/** @type {number} */ x) => (x - L.originX) >> L.mapShift;
+  assert.equal(out.density(cell(M), cell(M)), 5);
+  assert.equal(out.threat(cell(M), cell(M)), 3 * 1 + 2 * 4);
+  assert.equal(out.density(cell(-20 * M), cell(-20 * M)), 1);
 });
 
 /** A busy scene: rings of all types, a pushing player proxy that fires every tick. */

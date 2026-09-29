@@ -264,8 +264,8 @@ The first implementation (M2) runs a subset of the chain, with the same determin
 | | Passes and features |
 |---|---|
 | **In v0** | Free-slot scan, shot spawn (projectiles), unit spawn, bins, steering, integrate, projectiles, resolve, contact, targeting (`nearest` only), outbound copy |
-| **Added in M2** | Pickups: drops, magnet, collection and the scrap carry ([below](#pickups-in-m2)). Area effects (circle and ring), statuses, knockback and events ([below](#effects-statuses-and-events-in-m2)). The player flow field, the blocked grid, wall sliding, and walls that stop shots ([below](#flow-fields-and-walls-in-m2)). |
-| **Later** | Subgroup scans (v0 uses the workgroup-memory scan) and the base field (Assault mode). Also: cone and capsule effects, enemy-team effects, Magnetized and Overheated behaviour, the other target policies, chains, and the density and threat maps. |
+| **Added in M2** | Pickups: drops, magnet, collection and the scrap carry ([below](#pickups-in-m2)). Area effects (circle and ring), statuses, knockback and events ([below](#effects-statuses-and-events-in-m2)). The player flow field, the blocked grid, wall sliding, and walls that stop shots ([below](#flow-fields-and-walls-in-m2)). Targeting policies `strongest`, `aimed` and `chain`, the prefer-marked flag, and the density and threat maps ([below](#targeting-and-maps-in-m2)). |
+| **Later** | Subgroup scans (v0 uses the workgroup-memory scan) and the base field (Assault mode, and the `first` policy that follows it). Also: cone and capsule effects, enemy-team effects, Magnetized and Overheated behaviour, forking chains, and Shocked's preference in chains. |
 
 - v0 dispatches over each pool's **capacity**. Indirect dispatch by high-water mark ([buffers](#buffers)) comes later.
 - Spawn groups already carry their CPU-computed request prefix ([slot allocation](#deterministic-slot-allocation)).
@@ -335,6 +335,30 @@ The player field ([06: navigation](06-world.md#navigation)) shares the swarm's b
 - A tick that commits a field (the header's field-swap flag, with the words passed to `submit`) writes it into the other half. That tick and later ones read that half: the tick parameter `field` is 0, 1 or `FIELD_NONE`.
 - Commits are at least *L_field* ticks apart, more than the ticks a frame encodes, so a frame never overwrites a half that one of its earlier ticks still reads.
 - A swarm reset marks the field invalid until the next commit. SCRAPWAKE re-commits on the reset tick, so a replay that resets in place matches a live run on fresh buffers.
+
+### Targeting and maps in M2
+
+**Policies.** One workgroup per fire command.
+- Invocations split the cells in range and keep their best (key, slot). A tree reduction takes the minimum.
+- `nearest` keys on distance², and `strongest` on −HP.
+- The `PREFER_MARKED` flag adds 2^29 to every unmarked unit's key, so any Marked unit in range comes first.
+- `aimed` requests a shot along the command's binary angle, target or not.
+
+**Chains.** The Arc Welder and the Arc Pylon use chains.
+- A chain strikes its `nearest` pick at once and requests no shot. It then jumps up to `bounces` times (at most 8).
+- Each jump is another reduction over the cells within 3 m of the last target. It skips the units the chain already hit, which the workgroup keeps as a hit list.
+- The damage scales by the command's falloff (Q8) per jump.
+- A jump that finds nothing leaves the chain in place, so the loop needs no divergent exit.
+- Chain damage lands in the accumulators after this tick's resolve, so the next resolve applies it ([one-tick lags](#pass-chain)).
+
+**Fire-command words.**
+- Word 0: the source, `policy << 16`, `flags << 24`.
+- Word 1: the falloff (Q8), then `pierce << 16`.
+- Word 7: `aim | bounces << 16`.
+
+**Maps.**
+- Resolve adds every survivor into two outbound maps on 8 m cells ([BUDGETS](../BUDGETS.md#simulation-constants); 32 × 32 over the bin grid): a density count, and a threat map summing each type's threat weight (`TY.FLAGS` bits 16–31, the threat points of [content](../game/02-content.md#enemies)).
+- SCRAPWAKE's director reads the threat around PATCH at *T+K*, and holds the next wave while it is over the cap.
 
 ### Effects, statuses and events in M2
 

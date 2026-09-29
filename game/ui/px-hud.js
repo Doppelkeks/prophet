@@ -44,6 +44,7 @@ export class PxHud extends UiElement {
       <output id="kills"></output><span class="dim">kills</span><span class="dim">wave</span><output id="waves"></output>
       <span class="dim">downs</span><output id="downs"></output>
       <span class="dim">elites</span><output id="elites"></output>
+      <span class="dim">threat</span><output id="threat"></output>
       <span class="dim">stress</span><output id="stress"></output><span class="dim">shots</span><output id="shots"></output>
       <span class="dim">rejected</span><output id="rejected"></output></div>
     <div class="row"><span class="label">CORE</span><div class="bar energy"><div class="fill"></div></div><output id="energy"></output>
@@ -76,6 +77,7 @@ export class PxHud extends UiElement {
     text('oc', hud.overclock, (s) => (s > 0 ? `OVERCLOCK ${s.toFixed(1)} s` : 'overclock'));
     text('stomp', hud.stomp, (s) => (s > 0 ? `${s.toFixed(1)} s` : 'ready'));
     text('elites', hud.elites, String);
+    text('threat', hud.threat, String);
     text('taint', hud.taints, (n) => (n > 0 ? `events lost ×${n}: replay tainted` : ''));
     text('x', hud.x, (v) => v.toFixed(1));
     text('y', hud.y, (v) => v.toFixed(1));

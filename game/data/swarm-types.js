@@ -5,10 +5,10 @@ import { UnitFlag } from '../../engine/swarm/swarm-contract.js';
 
 /** @type {(import('../../engine/swarm/swarm-contract.js').UnitType & { name: string })[]} */
 export const SWARM_TYPES = [
-  { name: 'Scrubber', speed: Units.q10PerTick(3.2), radius: Units.q10(0.35), maxHp: Units.q8(3), contact: Units.q8(1), interval: 30, dropChance: Units.q16(0.35), dropValue: 1 },
-  { name: 'Mite', speed: Units.q10PerTick(4.8), radius: Units.q10(0.25), maxHp: Units.q8(1), contact: Units.q8(0.5), interval: 20, dropChance: Units.q16(0.2), dropValue: 1 },
+  { name: 'Scrubber', speed: Units.q10PerTick(3.2), radius: Units.q10(0.35), maxHp: Units.q8(3), contact: Units.q8(1), interval: 30, dropChance: Units.q16(0.35), dropValue: 1, threat: 2 },
+  { name: 'Mite', speed: Units.q10PerTick(4.8), radius: Units.q10(0.25), maxHp: Units.q8(1), contact: Units.q8(0.5), interval: 20, dropChance: Units.q16(0.2), dropValue: 1, threat: 1 },
   // Brutes are the demo's elites: heavy (they keep 3/8 of any knockback) and their deaths are reported as events.
-  { name: 'Brute', speed: Units.q10PerTick(2.0), radius: Units.q10(0.6), maxHp: Units.q8(12), contact: Units.q8(3), interval: 45, dropChance: Units.q16(1), dropValue: 5, knockback: 160, flags: UnitFlag.REPORT },
+  { name: 'Brute', speed: Units.q10PerTick(2.0), radius: Units.q10(0.6), maxHp: Units.q8(12), contact: Units.q8(3), interval: 45, dropChance: Units.q16(1), dropValue: 5, knockback: 160, flags: UnitFlag.REPORT, threat: 8 },
 ];
 
 /** Steps of STATUS_STEP (4) ticks: 15 steps = 1 s. Damage per step in Q8 HP (docs/engine/05-gpu-swarm.md#status-effects). */

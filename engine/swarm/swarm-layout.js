@@ -47,6 +47,9 @@ export const FIELD_NONE = 2;
 export const FIELD_NO_PATH = 0xffff;
 /** Within this field distance (about two cells) units seek proxy 0 directly: the field only knows its cell. */
 export const FIELD_DIRECT = 20;
+/** Chain lightning: bounce range (3 m, Q10) and the most bounces a command may ask for. */
+export const CHAIN_RANGE = 3072;
+export const MAX_BOUNCES = 8;
 export const HEADER_WORDS = 16;
 
 /** Inbound header words. */
@@ -83,6 +86,7 @@ export const SCAN_BLOCK = 256;
  * @property {number} arenaHalf Q10: units are clamped to ±arenaHalf
  * @property {number} pairCap separation is pairwise in cells with at most this many units
  * @property {number} ticksInFlight inbound blocks the ring holds (ticks encoded per frame)
+ * @property {number} mapShift density/threat map cell as a power of two, Q10 (13 = 8 m); a multiple of the bin cell
  */
 
 /** Layout uniform, in order. The WGSL `Layout` struct is generated from this list. */
@@ -96,7 +100,8 @@ export const LAYOUT_FIELDS = /** @type {const} */ ([
   'outWords', 'oKillsType', 'oKillsSource', 'oProxyDmg', 'oFireBits', 'typeCap', 'sourceCap', 'scanBlocks',
   'tSin', 'tTypes', 'keySpawnA', 'keySpawnR', 'keyPhase', 'aScanTmp', 'keyDrop', 'pickCap',
   'kPosX', 'kPosY', 'kValue', 'kInfo', 'aDrop', 'aDropReq', 'aPickFree', 'oProxyScrap',
-  'inEffects', 'effectCap', 'oEvents', 'eventCap', 'tStatus', 'tBlocked', 'pad2', 'pad3',
+  'inEffects', 'effectCap', 'oEvents', 'eventCap', 'tStatus', 'tBlocked', 'oDensity', 'oThreat',
+  'mapW', 'mapShift', 'pad4', 'pad5',
 ]);
 
 export class SwarmLayout {
@@ -119,6 +124,7 @@ export class SwarmLayout {
     arenaHalf: 65536,
     pairCap: 8,
     ticksInFlight: 4,
+    mapShift: 13,
   });
 
   /** @param {Partial<SwarmCaps>} [caps] */
@@ -136,6 +142,7 @@ export class SwarmLayout {
     if (scanBlocks > SCAN_BLOCK * 4) throw new Error('swarm: pools larger than the three-level scan supports');
     if (c.groups > 1024 || c.fires > 1024 || c.fires % 32 !== 0) throw new Error('swarm: fires must be a multiple of 32, at most 1024');
     if (c.effects < 1 || c.effects > 65535 || c.events < 1) throw new Error('swarm: effect and event caps must be positive');
+    if (c.mapShift < c.cellShift || c.mapShift - c.cellShift > 6) throw new Error('swarm: the map cell must be the bin cell times 2^0..2^6');
     if (c.units > 0xffffff || c.shots > 0xffffff || c.pickups > 0xffffff) throw new Error('swarm: pools must fit 24 bits');
     if (c.pickups < 1) throw new Error('swarm: the pickup pool needs at least one slot');
     const cells = c.gridW * c.gridW;
@@ -211,7 +218,11 @@ export class SwarmLayout {
     L.oProxyDmg = L.oKillsSource + c.sources;
     L.oProxyScrap = L.oProxyDmg + c.proxies;
     L.oFireBits = L.oProxyScrap + c.proxies;
-    L.oEvents = L.oFireBits + (c.fires >>> 5);
+    L.mapShift = c.mapShift;
+    L.mapW = Math.max(1, c.gridW >> (c.mapShift - c.cellShift));
+    L.oDensity = L.oFireBits + (c.fires >>> 5);
+    L.oThreat = L.oDensity + L.mapW * L.mapW;
+    L.oEvents = L.oThreat + L.mapW * L.mapW;
     L.outWords = L.oEvents + c.events * EVENT_WORDS;
     L.eventCap = c.events;
     L.typeCap = c.types;
@@ -226,7 +237,7 @@ export class SwarmLayout {
     L.keySpawnR = 0;
     L.keyPhase = 0;
     L.keyDrop = 0;
-    L.pad2 = L.pad3 = 0;
+    L.pad4 = L.pad5 = 0;
 
     /** Word offsets and sizes by name. */
     this.L = L;
@@ -283,6 +294,8 @@ export class SwarmLayout {
       ['FIELD_NONE', FIELD_NONE],
       ['FIELD_NO_PATH', FIELD_NO_PATH],
       ['FIELD_DIRECT', FIELD_DIRECT],
+      ['CHAIN_RANGE', CHAIN_RANGE],
+      ['MAX_BOUNCES', MAX_BOUNCES],
       ['SCAN_BLOCK', SCAN_BLOCK],
       ['OUT_MAGIC', OUT_MAGIC],
       ...Object.entries(IH).map(([k, v]) => /** @type {[string, number]} */ ([`IH_${k}`, v])),

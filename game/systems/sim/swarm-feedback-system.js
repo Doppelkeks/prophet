@@ -1,7 +1,7 @@
 // @ts-check
 import { System } from '../../../engine/ecs/system.js';
 import { EventKind } from '../../../engine/swarm/swarm-contract.js';
-import { Health, RunStats } from '../../components/index.js';
+import { Health, RunStats, Transform } from '../../components/index.js';
 
 /**
  * Applies the swarm's report of tick T − K: contact damage to PATCH (proxy 0), the scrap it collected,
@@ -11,7 +11,7 @@ import { Health, RunStats } from '../../components/index.js';
 export class SwarmFeedbackSystem extends System {
   static key = 'swarm-feedback';
   static stage = /** @type {const} */ ('Input');
-  static reads = [Health, RunStats];
+  static reads = [Health, RunStats, Transform];
 
   /** @type {System['update']} */
   update(cmd) {
@@ -42,6 +42,15 @@ export class SwarmFeedbackSystem extends System {
     cmd.set(run, RunStats.shots, out.shotsAlive);
     cmd.set(run, RunStats.scrap, reader.get(run, RunStats.scrap) + out.proxyScrap(0));
     cmd.set(run, RunStats.scrapDropped, reader.get(run, RunStats.scrapDropped) + out.scrapDropped);
+    // Local threat: the 3 × 3 map cells around PATCH.
+    const L = out.layout.L;
+    const mx = (reader.get(patch, Transform.x) - L.originX) >> L.mapShift;
+    const my = (reader.get(patch, Transform.y) - L.originY) >> L.mapShift;
+    let threat = 0;
+    for (let y = my - 1; y <= my + 1; y++) {
+      for (let x = mx - 1; x <= mx + 1; x++) if (x >= 0 && y >= 0 && x < L.mapW && y < L.mapW) threat += out.threat(x, y);
+    }
+    cmd.set(run, RunStats.threat, threat);
     let elites = reader.get(run, RunStats.elites);
     for (let k = 0; k < out.events; k++) if ((out.event(k, 0) & 0xff) === EventKind.UNIT_DIED) elites++;
     cmd.set(run, RunStats.elites, elites);

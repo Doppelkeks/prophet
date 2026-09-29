@@ -20,6 +20,7 @@ export const hud = {
   stomp: new Signal(0),
   elites: new Signal(0),
   taints: new Signal(0),
+  threat: new Signal(0),
   kills: new Signal(0),
   alive: new Signal(0),
   shots: new Signal(0),
@@ -49,6 +50,7 @@ export function updateHud(r) {
   hud.stomp.value = Math.round(r.get(I.stompCd) / 6) / 10;
   hud.elites.value = r.get(I.elites);
   hud.taints.value = r.get(I.taints);
+  hud.threat.value = r.get(I.threat);
   hud.kills.value = r.get(I.kills);
   hud.alive.value = r.get(I.alive);
   hud.shots.value = r.get(I.shots);

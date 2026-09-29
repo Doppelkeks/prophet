@@ -4,21 +4,27 @@
 // when and what; the GPU decides who and where."
 import { SIN_TABLE_Q14, SIN_TABLE_SIZE } from '../core/sin-table.js';
 import {
-  EFFECT_WORDS, EVENT_WORDS, FIRE_WORDS, GROUP_WORDS, HEADER_WORDS, IH, INFLAG, OH, OUT_MAGIC, PROXY_WORDS, STATUS_COUNT, STATUS_WORDS, TY, TYPE_WORDS,
+  EFFECT_WORDS, EVENT_WORDS, FIRE_WORDS, GROUP_WORDS, HEADER_WORDS, IH, INFLAG, MAX_BOUNCES, OH, OUT_MAGIC, PROXY_WORDS, STATUS_COUNT, STATUS_WORDS, TY, TYPE_WORDS,
 } from './swarm-layout.js';
 
 /** Target modes. v0: every mode chases proxy 0. */
 export const Mode = Object.freeze({ CHASE: 0, ASSAULT: 1, SEEK: 2, SCATTER: 3 });
 /** Spawn shapes. v0: ring. */
 export const Shape = Object.freeze({ RING: 0 });
-/** Targeting policies. v0: nearest. */
-export const Policy = Object.freeze({ NEAREST: 0 });
+/**
+ * Targeting policies (docs/engine/05-gpu-swarm.md#pass-chain). NEAREST minimizes (distance², slot);
+ * STRONGEST maximizes current HP (ties to the lower slot); AIMED fires along the command's angle; CHAIN
+ * strikes like NEAREST, then bounces. FIRST (along the base field) comes with the base field.
+ */
+export const Policy = Object.freeze({ NEAREST: 0, STRONGEST: 1, FIRST: 2, AIMED: 3, CHAIN: 4 });
+/** Fire-command flags. */
+export const FireFlag = Object.freeze({ PREFER_MARKED: 1 });
 /** Proxy teams and flags. */
 export const Team = Object.freeze({ PLAYER: 0, ENEMY: 1 });
 export const ProxyFlag = Object.freeze({ TARGETABLE: 1, BLOCKS: 2, COLLECTOR: 4, PUSHES: 8 });
 /** Largest fire range: keeps squared distances inside i32 (16 m). */
 export const MAX_RANGE = 16383;
-/** Type-table behavior flags (TY.FLAGS bits 0-7; bits 8-15 are the status immunity mask). */
+/** Type-table behavior flags (TY.FLAGS bits 0-7; bits 8-15 are the status immunity mask; 16-31 the threat weight). */
 export const UnitFlag = Object.freeze({ REPORT: 1 });
 /** The status vocabulary (docs/engine/05-gpu-swarm.md#status-effects): index = timer slot. */
 export const Status = Object.freeze({ BURNING: 0, SHOCKED: 1, SLOWED: 2, STUNNED: 3, MARKED: 4, CORRODED: 5, MAGNETIZED: 6, OVERHEATED: 7 });
@@ -43,6 +49,7 @@ export const MAX_IMPULSE = 4096;
  * @property {number} [dropChance] Q16 chance of dropping scrap on death (65536 = always)
  * @property {number} [dropValue] scrap units in the drop (0..32767)
  * @property {number} [immune] status immunity bitmask (1 << Status.X)
+ * @property {number} [threat] threat weight on the threat map (0..65535; the director's threat points)
  */
 
 /**
@@ -74,8 +81,9 @@ export class SwarmTables {
       t[at + TY.ARMOR] = u.armor ?? 0;
       t[at + TY.TIMING] = u.interval | ((u.knockback ?? 0) << 8);
       const immune = u.immune ?? 0;
-      if ((u.flags ?? 0) & ~0xff || immune & ~0xff) throw new Error(`swarm type ${k}: flags and immunities are 8-bit masks`);
-      t[at + TY.FLAGS] = (u.flags ?? 0) | (immune << 8);
+      const threat = u.threat ?? 0;
+      if ((u.flags ?? 0) & ~0xff || immune & ~0xff || threat < 0 || threat > 0xffff) throw new Error(`swarm type ${k}: flags and immunities are 8-bit masks, threat 16-bit`);
+      t[at + TY.FLAGS] = (u.flags ?? 0) | (immune << 8) | (threat << 16);
       const chance = u.dropChance ?? 0;
       const value = u.dropValue ?? 0;
       if (!(chance >= 0 && chance <= 65536 && value >= 0 && value <= 32767)) throw new Error(`swarm type ${k}: drop chance must be 0..65536 (Q16) and drop value 0..32767`);
@@ -157,8 +165,12 @@ export class SwarmInbound {
   }
 
   /**
-   * A fire command: the GPU picks the target (v0: nearest in range) and spawns one shot next tick.
-   * @param {{ source: number, x: number, y: number, range: number, damage: number, speed: number, life: number, pierce?: number, policy?: number }} f
+   * A fire command: the GPU picks the target by `policy` and spawns one shot next tick. AIMED fires along
+   * `aim` (a binary angle) whether or not anything is there. CHAIN deals its damage at once to the target and
+   * then to up to `bounces` more units, each the nearest within 3 m of the last one, never twice, the damage
+   * scaled by `falloff` (Q8) per jump.
+   * @param {{ source: number, x: number, y: number, range: number, damage: number, speed: number, life: number, pierce?: number, policy?: number,
+   *   flags?: number, aim?: number, bounces?: number, falloff?: number }} f
    * @returns {number} command index, or -1 when the cap is reached
    */
   fire(f) {
@@ -171,16 +183,19 @@ export class SwarmInbound {
     if (f.speed < 0 || f.speed > 0xffff || f.life <= 0 || f.life > 0xffff || f.speed * f.life >= 1 << 24) {
       throw new Error('swarm: shot speed × lifetime must stay below 16,384 m');
     }
+    const bounces = f.bounces ?? 0;
+    const falloff = f.falloff ?? 256;
+    if (bounces < 0 || bounces > MAX_BOUNCES || falloff < 0 || falloff > 256) throw new Error(`swarm: chains bounce 0..${MAX_BOUNCES} times, falloff 0..256 (Q8)`);
     const at = L.inFires + this.fires * FIRE_WORDS;
     const b = this.block;
-    b[at] = (f.source & 0xffff) | ((f.policy ?? 0) << 16);
-    b[at + 1] = (f.pierce ?? 0) << 16;
+    b[at] = (f.source & 0xffff) | ((f.policy ?? 0) << 16) | ((f.flags ?? 0) << 24);
+    b[at + 1] = falloff | ((f.pierce ?? 0) << 16);
     b[at + 2] = f.range;
     b[at + 3] = f.damage;
     b[at + 4] = f.x;
     b[at + 5] = f.y;
     b[at + 6] = (f.speed & 0xffff) | (f.life << 16);
-    b[at + 7] = 0;
+    b[at + 7] = ((f.aim ?? 0) & 0xffff) | (bounces << 16);
     return this.fires++;
   }
 
@@ -400,6 +415,15 @@ export class SwarmOutbound {
     if (b[at + 1] !== a1) return b[at + 1] >>> 0 > a1 >>> 0;
     if (b[at + 2] !== a2) return b[at + 2] >>> 0 > a2 >>> 0;
     return b[at + 3] >>> 0 > a3 >>> 0;
+  }
+
+  /** Live units in map cell (mx, my) this tick. @param {number} mx @param {number} my */
+  density(mx, my) {
+    return this.block[this.layout.L.oDensity + my * this.layout.L.mapW + mx];
+  }
+  /** Threat weight in map cell (mx, my) this tick. @param {number} mx @param {number} my */
+  threat(mx, my) {
+    return this.block[this.layout.L.oThreat + my * this.layout.L.mapW + mx];
   }
 
   /** Scrap value collected by proxy `p` this tick. @param {number} p */

@@ -13,6 +13,15 @@ export const STOMP = Object.freeze({
   source: 2,
 });
 
+/** Kill-credit source of the Arc Welder's chains (the gun is 1). */
+export const ARC_SOURCE = 4;
+
+/**
+ * The director holds the next wave while the threat within 12 m of PATCH (the 3 × 3 map cells around it,
+ * at T − K) is at or above this many threat points per stress level (docs/game/01-gdd.md#director).
+ */
+export const THREAT_CAP = 160;
+
 export const OVERCLOCK = Object.freeze({
   duration: Units.ticks(5),
   /** Fire interval × 5/7 (+40 % fire rate) and move speed × 6/5 (+20 %) while it runs. */
