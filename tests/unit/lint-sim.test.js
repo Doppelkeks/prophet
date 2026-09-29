@@ -28,6 +28,11 @@ test('non-sim files are not checked for float rules', () => {
   assert.deepEqual(rules('engine/render/renderer.js', 'const a = Math.sin(0.5) / 2;'), []);
 });
 
+test('any sim/ directory under engine/ is sim code', () => {
+  assert.deepEqual(rules('engine/world/sim/collapse.js', 'const a = Math.sqrt(x);'), ['math-float']);
+  assert.deepEqual(rules('engine/world/simulator.js', 'const a = Math.sqrt(x);'), []);
+});
+
 test('flags float types, literals and builtins in WGSL sim kernels only', () => {
   const kernel = 'engine/swarm/kernels/steer.wgsl';
   assert.deepEqual(rules(kernel, 'let v: f32 = 1.0;'), ['wgsl-float-type', 'wgsl-float-literal']);

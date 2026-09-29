@@ -203,7 +203,7 @@ Actors never shade below a minimum light level, so PATCH and the Sweep read even
 | The Sump | Flooded undercity, failing lamps, pipes; low-key grade | Rain, drips |
 | Halcyon Spire | Sterile white arcology; cyan-white grade, maximum contrast for PATCH | Clear |
 
-**Rain** is GPU streak particles (Steel 500, dithered), a specular band on wet upward faces, and puddle decals tinted by the nearest light cluster. There are no screen-space reflections. On `mobile`, rain density is the first thing to drop when the particle budget tightens.
+**Rain** is GPU streak particles (Steel 500, dithered), a specular band on wet upward faces, and puddle decals tinted by the nearest light cluster. There are no screen-space reflections. On `std`, rain density is the first thing to drop when the particle budget tightens.
 
 ## Characters
 
@@ -335,7 +335,7 @@ Towers are salvage-built from the same scrap as PATCH: rust, concrete and welded
 
 ## HUD wireframes
 
-These layouts are indicative. Behaviour, update rates and per-device input are in [04-ux-flows](04-ux-flows.md#hud), including the touch build sheet. Values are samples: `S:nnn` is a scrap cost and `P:n` a power cost ([towers](02-content.md#towers)).
+These layouts are indicative. Behaviour, update rates and per-device input are in [04-ux-flows](04-ux-flows.md#hud). Values are samples: `S:nnn` is a scrap cost and `P:n` a power cost ([towers](02-content.md#towers)).
 
 ### Desktop combat HUD
 
@@ -363,30 +363,6 @@ Vitals sit top-left, the clock and assault top-centre, and economy and minimap t
 +------------------------------------------------------------------------------------------+
 ```
 
-### Mobile landscape combat HUD
-
-Stick zone bottom-left, button arc bottom-right, read-only info along the top. Nothing interactive sits inside the safe-area insets, and every target meets the minimum touch size ([BUDGETS: UI constants](../BUDGETS.md#ui-constants)).
-
-```text
-+------------------------------------------------------------------------------------------+
-|// (O) HP [#######---]           12:34   ASSAULT 0:42        LV 14 ((1,240))  [ || ]    //|
-|//     EN [#####-----]           [Mite][Wasp][PRIME]                                    //|
-|// FORGE [######--] UP                                                                  //|
-|//                                                                    [ LVL +2 ]        //|
-|// // = env(safe-area-inset-left/right)                                                 //|
-|// (notch side and its mirror)                                        [ BODY ]          //|
-|//                              world + edge threat arrows                              //|
-|//                                                                                      //|
-|// . . . . . . . . . . . . . .                        [RECALL]   [BUILD]                //|
-|// .  floating stick zone     .                                                         //|
-|// .  spawns under the thumb  .                       [OVERCLOCK]                       //|
-|// .        ( O )             .                                                         //|
-|// . . . . . . . . . . . . . .                                      (  DASH  )          //|
-|//                                                    context: [ OPEN ]                 //|
-|//__________________ env(safe-area-inset-bottom): home indicator _______________________//|
-+------------------------------------------------------------------------------------------+
-```
-
 ### Level-up screen
 
 ```text
@@ -406,7 +382,7 @@ Stick zone bottom-left, button arc bottom-right, read-only info along the top. N
 |                    |   the close-up previews the part on PATCH                           |
 |------------------------------------------------------------------------------------------|
 | [1-4] or click: PICK   [R] REROLL x2   [X hold] BANISH x1   [BKSP] SKIP                  |
-| pad: [LS] focus [A] pick [X] reroll [Y hold] banish [B] back | touch: tap, then PICK     |
+| pad: [LS] focus [A] pick [X] reroll [Y hold] banish [B] back                             |
 +------------------------------------------------------------------------------------------+
 ```
 
@@ -505,11 +481,11 @@ Per-type voice caps are in [BUDGETS: audio constants](../BUDGETS.md#audio-consta
 | Mix rule | Detail |
 |---|---|
 | Buses | Master → Music, SFX (combat, world, swarm bed), Voice (announcer, PATCH), UI, Ambience. Web Audio runs on the main thread, fed by the audio event ring ([runtime topology](../engine/01-overview.md#runtime-topology)). |
-| Danger cues are always audible | Siren, Forge under attack, shield down, Shatter, and boss and Sniper telegraphs use reserved voices outside the per-type caps. They are never ducked or stolen, and they sit in the mid-range, so they survive phone speakers and mono. |
+| Danger cues are always audible | Siren, Forge under attack, shield down, Shatter, and boss and Sniper telegraphs use reserved voices outside the per-type caps. They are never ducked or stolen, and they sit in the mid-range, so they survive small laptop and Steam Deck speakers, and mono. |
 | Ducking | Boss intros and announcer lines duck music and SFX. Opening level-up or Assembly (a single-player pause) stops world SFX and low-passes the music. Big explosions briefly duck the swarm bed. |
 | Voice stealing | Within the caps, the oldest and quietest voice goes first |
 | Captions | Every priority cue has a caption, with a direction hint for off-screen sources, e.g. "[SIREN] <" ([pause and settings](04-ux-flows.md#pause-and-settings)) |
-| Range and mono | Wide / Normal / Night presets (phones default to Night). There is a mono option, and no information depends on panning alone. |
+| Range and mono | Wide / Normal / Night presets. There is a mono option, and no information depends on panning alone. |
 
 ## Asset pipeline
 
@@ -532,7 +508,7 @@ These are notes for artists. The tooling is in [asset pipeline](../engine/10-too
 | `mus_`, `sfx_`, `vo_` | Music stems, SFX, voice lines | `mus_docks_assault`, `sfx_pickup_scrap_03`, `vo_announcer_siren_01` |
 
 - **Naming.** Lowercase only; `_` separates fields and `-` joins words. Variants are `_a`, `_b`; tiers are `_mk1` to `_mk3`, followed by the branch letter (`_mk3a`).
-- **Audio.** Author at the engine sample rate ([BUDGETS: audio constants](../BUDGETS.md#audio-constants)). A track's stems share one length and one bar grid. The codec per platform is chosen in M1 (to verify: Opus in Safari and WKWebView).
+- **Audio.** Author at the engine sample rate ([BUDGETS: audio constants](../BUDGETS.md#audio-constants)). A track's stems share one length and one bar grid. The codec per platform is chosen in M1 (to verify: Opus in Safari).
 
 ## Readability KPIs
 
@@ -559,5 +535,5 @@ These are notes for artists. The tooling is in [asset pipeline](../engine/10-too
 - **Ember does double duty.** The plan's palette has no dedicated red, so Ember covers both critical danger and Military rarity. This doc limits Military to static UI frames and loot beams. A separate alarm token would be cleaner; decide in M4 look-dev.
 - **Pixel font.** Should we draw our own Latin font or adopt an OFL one? Which licensed bitmap font covers CJK?
 - **Announcer.** Licensed TTS or a processed human VO actor? Which languages beyond English get voiced?
-- **Rain on `mobile`.** Does wet shading fit the post-processing budget ([BUDGETS: GPU frame budgets](../BUDGETS.md#gpu-frame-budgets))?
+- **Rain on `std`.** Does wet shading fit the post-processing budget on the Steam Deck ([BUDGETS: GPU frame budgets](../BUDGETS.md#gpu-frame-budgets))?
 - **Close-ups.** Is the integer-scaled in-game model good enough for the level-up and Assembly close-ups, or does PATCH need a dedicated close-up LOD?

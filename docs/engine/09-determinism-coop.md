@@ -80,7 +80,7 @@ The values are in [BUDGETS: simulation constants](../BUDGETS.md#simulation-const
 | Velocity | Q10 meters per tick | `i32` (`i16` in the swarm) | Integration is a plain add |
 | Altitude (flyers) | Q10 meters | `u16` in the swarm | |
 | Angle | 16-bit binary angle | `u16`, `i32` in math | Wraps for free with `& 0xFFFF`; a facing index is just the angle's top bits |
-| Sine, cosine | Sine table, Q14 output | `i16` table | cos(*a*) = sin(*a* + a quarter turn) |
+| Sine, cosine | Sine table, Q14 output | `i32` table of 4,096 entries (the values fit in `i16`) | cos(*a*) = sin(*a* + a quarter turn) |
 | Square root | Integer `isqrt` | `u32` in, `u16` out | Usually avoided: compare squared distances instead |
 | HP and damage | Q8 | `i32` | Fractional damage (percentages, damage over time) without drift |
 | Time | Ticks | `u32` | Never seconds or milliseconds in sim code |
@@ -89,7 +89,7 @@ The values are in [BUDGETS: simulation constants](../BUDGETS.md#simulation-const
 
 **Grids are shifts.** With the current [world constants](../BUDGETS.md#world-constants), a coordinate in Q10 maps to a grid by a right shift, e.g. voxel `x >> 8`, base-field cell `x >> 10`, swarm bin and player-field cell `x >> 11`, voxel chunk `x >> 13`. `>>` rounds toward negative infinity, so cells never straddle zero. Grid sizes should stay powers of two; anything else needs a division.
 
-**The sine table is baked data.** `Math.sin` is implementation-approximated, so a table computed at startup could differ between JS engines. The table ships as a binary asset whose hash is checked at load, and the same bytes are uploaded to the GPU. The index is the angle's top bits (`angle >> 4` for the current table size).
+**The sine table is baked data.** `Math.sin` is implementation-approximated, so a table computed at startup could differ between JS engines. The table is a **generated module**, written once by a generator script; a unit test pins its content hash, so a regenerated table can't change silently. The same values are uploaded to the GPU. The index is the angle's top bits (`angle >> 4` for the current table size).
 
 ### Overflow-safe arithmetic
 
@@ -98,25 +98,31 @@ The values are in [BUDGETS: simulation constants](../BUDGETS.md#simulation-const
 - Multiply only with `Math.imul`. A plain `*` of two 32-bit values can exceed 2^53 and silently lose bits.
 - Every product has a documented operand range, e.g. speed (Q10, below 2^10) × sine (Q14, at most 2^14) stays below 2^24. Dev builds assert the ranges inside the helpers.
 - Products that don't fit use `mulShr`, which splits one operand into 16-bit halves (below).
-- Division truncates toward zero in both languages; `(a / b) | 0` is exact for 32-bit operands. `>>` floors. Pick one deliberately, and use it consistently.
-- Never divide by zero: JS yields 0 after `| 0`, while WGSL defines its own result. Treat `INT_MIN / -1` as out of range as well. The shared `idiv` helper guards both cases.
+- Division truncates toward zero in both languages, and `>>` floors. Pick one deliberately, and use it consistently.
+- Integer division uses `Fixed.idiv` (`Fixed.imod` for remainders, `udiv` and `umod` for `u32`), with **WGSL semantics**: `a / 0 = a`, `a % 0 = 0` and `INT_MIN / -1 = INT_MIN`. Otherwise `idiv` is `(a / b) | 0`, which is exact for 32-bit operands. The sim lint bans a bare `/`, because `(a / b) | 0` yields 0 for `a / 0` and would diverge from the GPU. Zero divisors are still avoided by design; the helpers make an accidental one deterministic.
 - Reduce precision before squaring distances. A district-sized delta in Q10 overflows 32 bits when squared; the same delta in Q5 (`d >> 5`) squared fits easily.
 
 **WGSL:**
 - `i32` and `u32` arithmetic wraps silently. That matches `Math.imul` and `| 0`, but only if JS coerces at exactly the same points. The simpler rule is to **document ranges so that wraps never happen at all**.
 - Shift counts stay within 0–31. Both languages mask larger counts, but relying on that is fragile.
+- Integer `/` and `%` need no helper: WGSL already defines the edge cases that `Fixed.idiv` reproduces.
 
 ```js
 // @ts-check
-/** Fixed-point helpers. Bit-identical to fixed.wgsl; integers only. */
-export class Fixed {
-  /** Q14 sine table, loaded from a hash-checked asset. Never Math.sin at runtime. */
-  static SIN = new Int16Array(4096);
+import { SIN_TABLE_Q14 } from './sin-table.js';  // generated module; its content hash is pinned in a unit test
 
+/** Fixed-point helpers. Bit-identical to fixed.wgsl; integers only. Never Math.sin at runtime. */
+export class Fixed {
   /** @param {number} a  binary angle */
-  static sinB(a) { return Fixed.SIN[(a >>> 4) & 4095]; }
+  static sinB(a) { return SIN_TABLE_Q14[(a >>> 4) & 4095]; }
   /** @param {number} a  binary angle */
-  static cosB(a) { return Fixed.SIN[((a + 16384) >>> 4) & 4095]; }
+  static cosB(a) { return SIN_TABLE_Q14[((a + 16384) >>> 4) & 4095]; }
+
+  /** a / b truncated toward zero, with WGSL's edge cases: a / 0 = a, INT_MIN / -1 = INT_MIN. */
+  static idiv(a, b) {
+    if (b === 0) return a | 0;
+    return (a / b) | 0;                             // sim-allow: exact truncating i32 division
+  }
 
   /** (a * b) >> s without losing high bits. Requires |b| < 2^15 and 1 <= s <= 16. */
   static mulShr(a, b, s) {
@@ -257,7 +263,6 @@ The sim consumes only **commands**, each stamped with the tick it applies to. Ev
 | Equip or salvage a part | Offer index, slot | UI (assembly screen) |
 | Pause, resume | — (single-player only; while paused, no ticks run) | UI |
 | Swarm reset | First discarded tick | Engine, after device loss ([05](05-gpu-swarm.md#resets-and-device-loss)) |
-| Swarm rate switch | Full or half rate | Engine, dynamic step-down ([08](08-platforms.md#tier-detection)) |
 
 - Commands refer only to sim-stable identifiers: tile coordinates, offer indices, and entity handles (which are deterministic). Never DOM state or screen positions.
 - Settings that don't affect the sim (volume, UI scale, graphics) never enter the log. The game-speed accessibility option changes how many ticks run per second, not what a tick does, so it doesn't enter the log either.
@@ -292,7 +297,7 @@ Collision data is not asynchronous. The engine worker is the voxel authority and
 | Part | Contents |
 |---|---|
 | Build hash | Identity of the code and the cooked data ([10](10-tooling-testing.md)) |
-| Sim profile | Everything tier-dependent that changes results: district size, pool caps, ECS capacity, *K*, the initial swarm rate |
+| Sim profile | `high` or `std`: everything tier-dependent that changes results (district size, pool caps, ECS capacity, *ρ*, *K*, the swarm rate) |
 | Run config | Mode, district, heat tier, seed |
 | Players | Per player: Chassis, starting loadout, and the meta unlocks that shape the item pool |
 | Command log | Per-tick input records plus UI and engine commands, run-length encoded |
@@ -347,7 +352,7 @@ sequenceDiagram
 ```
 
 - Every peer runs the full sim, CPU and GPU, from the same commands. Only commands travel: a few bytes per player per tick.
-- **Session handshake.** The build hash and the **sim profile** must match. Performance tiers differ in caps, district size, *K* and swarm rate ([BUDGETS](../BUDGETS.md#simulation-constants)), so a mixed session runs a common profile: for example the larger *K*, the slower swarm rate and the smaller caps.
+- **Session handshake.** The build hash and the **sim profile** must match. The `high` and `std` profiles differ in their caps and *ρ* ([BUDGETS: sim profiles](../BUDGETS.md#sim-profiles)), so a mixed session runs the lowest common profile, `std`.
 - **Input delay *L_input*.** Commands are stamped `tick + L_input` so that they arrive before they're needed ([BUDGETS: simulation constants](../BUDGETS.md#simulation-constants)). Cosmetic prediction, a render-only extrapolation of the local PATCH from its pending commands, can hide part of the delay without touching the sim.
 - **Tick gating.** A peer runs tick *T* only when it holds every peer's record for *T*. A late peer stalls everyone, the same rule as for K-latency.
 - **Transport.** On the web, a WebRTC DataChannel, unordered and without retransmits. Every packet repeats the last few ticks of commands, so a single lost packet costs nothing. `RTCPeerConnection` lives on the main thread, which forwards commands into the engine's input path (moving the DataChannel into a worker is to be verified). In Electron, Steam Networking through the FFI shim ([ADR-021](../DECISIONS.md#adr-021-steam-via-a-thin-ffi-shim)). Both are future work.
@@ -416,7 +421,7 @@ If cross-GPU bit-exactness fails (the revisit clause of [ADR-012](../DECISIONS.m
 
 ## Testing
 
-- **Fixed-point helpers:** `isqrt` exhaustively over all 16-bit inputs and on sampled 32-bit inputs; `mulShr` against `BigInt` arithmetic; the sine table's hash; JS vs WGSL golden vectors for every helper (a compute shader runs the same inputs in headless Chromium).
+- **Fixed-point helpers:** `isqrt` exhaustively over all 16-bit inputs and on sampled 32-bit inputs; `mulShr` against `BigInt` arithmetic; `idiv` edge cases (zero divisor, `INT_MIN / -1`) against WGSL; the sine-table module's pinned content hash; JS vs WGSL golden vectors for every helper (a compute shader runs the same inputs in headless Chromium).
 - **RNG:** golden vectors in JS and WGSL; offline statistical sanity checks; independence between streams.
 - **Two sims in one process:** two instances inside one Node process replay the same log, and their hashes must match on every tick. This is cheap, and it catches hidden global state.
 - **Execution-mode equivalence:** serial vs chunk-parallel, any worker count, `shared` vs `transfer` vs `inline`, all with identical hashes ([02: testing](02-core-ecs-jobs.md#testing)).
@@ -428,7 +433,7 @@ If cross-GPU bit-exactness fails (the revisit clause of [ADR-012](../DECISIONS.m
 
 - Values for the co-op input delay *L_input* and the commit lags *L_field*, *L_collapse* and *L_pcg* are now initial targets in [BUDGETS](../BUDGETS.md#simulation-constants); M5 validates them.
 - Should the sine table interpolate between entries? Smoother turning, for one more multiply.
-- Cross-tier co-op (desktop with mobile): a lowest-common sim profile, or same-tier sessions only? District size differs between tiers, which affects the design, not just performance.
+- Cross-tier co-op (`high` with `std`) runs the `std` profile. Is its lower density acceptable to `high` players, or should sessions be same-tier only? The district is the same, so only density differs.
 - Late join: a checkpoint plus a swarm reset, or no late join in v1?
 - What does hashing GPU state cost in release co-op builds, and what is the right interval?
 - Server-side replay verification for Daily Seed leaderboards would need headless WebGPU on a server. Is it worth it?

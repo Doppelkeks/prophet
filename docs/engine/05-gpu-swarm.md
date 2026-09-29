@@ -66,7 +66,7 @@ Reading the contract, with examples:
 - The unit SoA spans exactly **two** storage buffers (`U` and `A`). Each field is a contiguous array inside its buffer, and a uniform offset table says where. Adding a field or changing a capacity is a data change, not a binding change. A pass declares `A` as `array<atomic<i32>>` or as plain `array<u32>`, whichever it needs; it is the same buffer.
 - No pass binds more than the default limit of 8 storage buffers per stage ([03](03-rendering.md#webgpu-limits-policy)).
 - Pools are sized per performance tier from the [caps](../BUDGETS.md#entity-caps), and together they fit the swarm pool in [BUDGETS: GPU memory](../BUDGETS.md#gpu-memory). No binding comes close to the per-binding size limit.
-- Dispatch sizes follow each pool's **high-water mark**, using indirect dispatch arguments written by the spawn pass, not the pool capacity.
+- Dispatch sizes follow each pool's **high-water mark**, using indirect dispatch arguments written by the spawn pass, not the pool capacity. ([v0](#v0-scope) still dispatches over the capacity.)
 
 ### Unit record
 
@@ -139,7 +139,7 @@ The **pattern table** (projectile kind, count, spread, speed, lifetime, impulse,
 
 1. **Free-slot scan.** Every tick, an exclusive prefix scan over each pool's dead flags writes that pool's free slots in **ascending order**. The same scan compacts the units that died last tick, which yields the drop and split requests in slot order.
 2. **Requests in a fixed order.** CPU spawn groups arrive in upload order, which is already deterministic ([contract](#cpu-gpu-contract)). GPU-originated requests (pickup drops, projectiles from targeting, splits, detonations) come from the previous tick and are ordered by producer index through count → scan passes.
-3. **Assignment.** After spawn groups are expanded (a scan over their counts), request *j* takes free slot *j*. Requests beyond the free count are rejected in order and counted.
+3. **Assignment.** Each spawn group carries its **request prefix**: the index of its first request, an exclusive prefix sum over the groups' counts computed on the CPU. Expanding the groups therefore needs no GPU scan. Request *j* takes free slot *j*. Requests beyond the free count are rejected in order and counted.
 4. **Generations.** Reusing a slot increments its generation. Anything that references a unit (a homing projectile, a chain's hit mask) stores slot + generation and drops stale references.
 
 The slot index is therefore a deterministic ID, and every tie-break uses it.
@@ -196,7 +196,7 @@ flowchart TD
 
 **Order independence.** Scatter uses the value returned by `atomicAdd` as a position, so the order of slots inside a cell changes from run to run. Every consumer of the bins must therefore be order-independent: commutative integer sums, or min/max with a slot tie-break. There are no "first N neighbors" loops and no early exits on the first hit. Sorting inside cells was rejected: it costs a segmented sort every tick and buys nothing once every consumer is order-independent.
 
-**Separation stays O(1) in dense crowds.** Pairwise separation runs only in cells whose *count* is at or below a small cap. Above it, units follow a pressure term from the gradient of the neighboring bin counts. Both depend on counts and positions, never on scatter order.
+**Separation stays O(1) in dense crowds.** A unit applies pairwise linear repulsion against the members of its 3×3 bin neighbourhood, but only in cells whose *count* is at or below the [pairwise cap](../BUDGETS.md#simulation-constants). Denser cells contribute two O(1) terms instead: an expansion away from the cell's centroid (its exact integer position sum divided by its count) and a density-gradient pressure from the nine bin counts. All of these are order-independent integer sums, so none depends on scatter order.
 
 **Target modes.** Chase follows the player field; Assault follows the base field toward the Forge; Seek steers straight at a proxy (flyers, final approach); Scatter moves away from an effect center (EMP). PATCH's proxy pushes units away softly as they overlap. PATCH's own movement ignores the swarm, so crowds part but never block ([ADR-017](../DECISIONS.md#adr-017-25d-navigation-with-flow-fields) covers flyers and walls).
 
@@ -257,14 +257,26 @@ fn steerIntegrate(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 The kernel assumes a packed field cell (distance to the goal and a direction angle). The authoritative field format is in [06: navigation](06-world.md#navigation).
 
+### v0 scope
+
+The first implementation (M2) runs a subset of the chain, with the same determinism rules:
+
+| | Passes and features |
+|---|---|
+| **In v0** | Free-slot scan, shot spawn (projectiles), unit spawn, bins, steering, integrate, projectiles, resolve, contact, targeting (`nearest` only), outbound copy |
+| **Later** | Subgroup scans (v0 uses the workgroup-memory scan), area effects, statuses, pickups, events and flow fields; also the other target policies, chains, and the density and threat maps |
+
+- v0 dispatches over each pool's **capacity**. Indirect dispatch by high-water mark ([buffers](#buffers)) comes later.
+- Spawn groups already carry their CPU-computed request prefix ([slot allocation](#deterministic-slot-allocation)).
+
 ## CPU-GPU contract
 
 ### Inbound, every tick (CPU → GPU)
 
 | Stream | Record | Cap | Ordering rule |
 |---|---|---|---|
-| Header | 16 B: tick; spawn, effect, fire and proxy counts; flags (swarm reset, rate switch, field swap) | 1 | — |
-| Spawn groups | 24 B: type, target mode, shape (point, ring, edge), flags, count, HP scale, center x/y, radii | Bounded by free slots | Command-buffer key order |
+| Header | 16 B: tick; spawn, effect, fire and proxy counts; flags (swarm reset, field swap) | 1 | — |
+| Spawn groups | 32 B: type, target mode, shape (point, ring, edge), flags, count, request prefix (computed on the CPU), HP scale, center x/y, radii | Bounded by free slots | Command-buffer key order; the request prefix follows it |
 | Area effects | 32 B: shape (circle, cone, capsule, ring), team, status and tier, center x/y, size and angle, damage Q8, impulse Q10, source | [Per tick](../BUDGETS.md#entity-caps) | Command-buffer key order; cap applied after the merge |
 | Fire commands | 32 B: source entity, source proxy, pattern, policy, pierce, status and tier, flags, aim angle, bounces, range Q10, damage Q8, origin x/y | [Per tick](../BUDGETS.md#entity-caps) | Command-buffer key order; cap applied after the merge |
 | Actor proxies | 24 B: entity, x/y, radius, aux (magnet radius for collectors), team, kind, flags (targetable, blocks units, collector, marked), HP Q8 | [Per tick](../BUDGETS.md#entity-caps) | Ascending entity handle |
@@ -341,7 +353,7 @@ sequenceDiagram
 - The block of tick *T* is applied at the start of tick *T+K* ([K](../BUDGETS.md#simulation-constants)). Never earlier, never later. The delay counts ticks, not frames, so it doesn't depend on the frame rate, and every peer applies a block on the same tick.
 - If the block hasn't been harvested when *T+K* is due, **the sim stalls**: that tick doesn't run this frame. Rendering, UI and audio carry on; interpolation clamps at the last tick, so the world holds still for a frame. Events are never skipped and never applied late. Stalls are counted in the perf overlay and asserted in perf CI.
 - **Feedback never waits for *K*.** Hit flashes, damage numbers ([world-space UI](03-rendering.md#world-space-ui)), death VFX, turret yaw and even PATCH's own hurt flash (from the proxy accumulators) are written by the GPU in the same tick. Only gameplay consequences (HP, scrap, on-hit effects) wait for *T+K*.
-- **Half-rate swarm (mobile option).** The swarm passes run on every second sim tick ([rate](../BUDGETS.md#simulation-constants)), and rendering interpolates. CPU commands stamped on an off tick run in the next swarm tick, in order. *K* still counts sim ticks. Switching the rate mid-run is a tick-stamped engine command, so replays and co-op peers switch on the same tick ([09](09-determinism-coop.md#input-as-commands)).
+- **Half-rate swarm (reserve, unused in v1).** If the `std` profile ever needs it ([rate](../BUDGETS.md#simulation-constants)), the swarm passes run on every second sim tick and rendering interpolates. CPU commands stamped on an off tick run in the next swarm tick, in order, and *K* still counts sim ticks. The rate belongs to the [sim profile](../BUDGETS.md#sim-profiles), so it never changes mid-run.
 
 ## Status effects
 
@@ -423,7 +435,7 @@ Tuning (durations per tier, damage per step, multipliers) lives in game data ([c
 | A pool is full | Deterministic rejection and a counter; the director throttles; gems merge |
 | `subgroups` feature missing | Workgroup shared-memory scans and reductions, with identical results |
 | `timestamp-query` missing | No per-pass GPU timings; the overlay shows CPU-side frame timing only |
-| `mobile` over budget | Dynamic step-down to the half-rate swarm, as a tick-stamped command ([08](08-platforms.md#tier-detection)). Caps change only between runs. |
+| `std` over budget | The render-only step-down ([08](08-platforms.md#tier-detection)). Caps and the swarm rate change only between runs. |
 | Device loss | Swarm reset ([above](#resets-and-device-loss)) |
 | WGSL hash differs from the reference in CI | The build fails; the per-pass diff names the kernel |
 
@@ -443,7 +455,7 @@ Tuning (durations per tier, damage per step, multipliers) lives in game data ([c
 - Should voxel-hit events be pre-aggregated per coarse cell (e.g. 1 m) on the GPU, to cut event volume when many shots hit one wall?
 - Is the initial density/threat map cell ([BUDGETS](../BUDGETS.md#simulation-constants), one cell per voxel-chunk column) fine enough for the director and the camera? Validate in M2.
 - Long-range targeting: a hierarchical search over the coarse map, or brute force over bins with early ring termination?
-- Dispatch count on mobile: about 16 small dispatches per swarm tick, times the ticks run per frame. Which passes should be fused?
-- Atomic contention in extreme crowds (thousands of units in one cell) on mobile GPUs.
+- Dispatch count on the Steam Deck: about 16 small dispatches per swarm tick, times the ticks run per frame. Which passes should be fused?
+- Atomic contention in extreme crowds (thousands of units in one cell), especially on integrated GPUs.
 - Should flyers get their own pool and passes, instead of a flag?
 - Is "largest single hit gets the kill" the right credit rule for on-kill effects? A design question for the GDD.

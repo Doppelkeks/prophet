@@ -27,7 +27,7 @@ These terms are used across the Prophet engine docs and the SCRAPWAKE game docs.
 | **Debris body** *(engine)* | A falling chunk of a collapsed structure. It is simulated deterministically on the CPU as a kinematic body, deals crush damage and places rubble voxels. See [06: debris](engine/06-world.md#debris). |
 | **Debris voxel particle** *(engine)* | A cosmetic GPU particle that a debris body shatters into on impact. |
 | **Design load** | The entity count the game design uses, as opposed to the technical **ceiling**. See [BUDGETS.md](BUDGETS.md#entity-caps). |
-| **Device loss** *(engine)* | The WebGPU device disappears (backgrounding, driver reset). The engine rebuilds GPU state from the CPU copy. |
+| **Device loss** *(engine)* | The WebGPU device disappears (driver reset, GPU-process crash). The engine rebuilds GPU state from the CPU copy. |
 | **Director** *(game/engine)* | System that paces spawns: minute tables plus adaptive intensity. |
 | **District** *(game)* | The procedural map of one Cycle. Examples: Rust Docks, Neon Bazaar, Glasswall, The Sump, Halcyon Spire. |
 | **Engine worker** *(engine)* | The dedicated worker that owns the sim loop and the WebGPU device. |
@@ -50,7 +50,7 @@ These terms are used across the Prophet engine docs and the SCRAPWAKE game docs.
 | **MVE** | Minimum Viable Engine: the smallest engine feature set that can ship the vertical slice. See [VERTICAL-SLICE.md](VERTICAL-SLICE.md). |
 | **Overclock** *(game)* | The Core's active ability: a short burst of boosted fire rate and speed. |
 | **PATCH** *(game)* | The protagonist, a scrapped maintenance robot rebuilding itself. |
-| **Performance tier** | `high`, `std` or `mobile`. See [BUDGETS.md](BUDGETS.md#quality-tiers). |
+| **Performance tier** | `high` or `std`. See [BUDGETS.md](BUDGETS.md#quality-tiers). |
 | **Pickup** *(game/engine)* | A scrap gem. It lives in the GPU swarm, is magnetised to PATCH, and merges when over the cap. |
 | **Plating** *(game)* | PATCH's armour upgrade track, shown as visible armour pieces. |
 | **Player field** *(engine)* | Full-map flow field whose goal is PATCH. Chasers follow it. |
@@ -62,7 +62,7 @@ These terms are used across the Prophet engine docs and the SCRAPWAKE game docs.
 | **Scrap** *(game)* | The run currency. Collected scrap counts toward XP (the total collected) and is spent as currency (the current balance). |
 | **Seqlock** *(engine)* | Sequence-counter protocol that lets the main thread read the UI state block without tearing. |
 | **Shatter** *(game)* | At 0 HP, PATCH breaks apart and must re-collect its scattered parts within a short window. It costs a reboot charge and doubles as the co-op revive. |
-| **Sim profile** *(engine)* | The tier-dependent constants that change simulation results (K, commit lags, swarm rate, caps, district size). It is fixed per run; co-op uses the lowest common profile. See [BUDGETS.md](BUDGETS.md#sim-profiles). |
+| **Sim profile** *(engine)* | The tier-dependent constants that change simulation results (K, commit lags, swarm rate, caps, density factor, district size). There are two, `high` and `std`. It is fixed per run; co-op uses the lowest common profile. See [BUDGETS.md](BUDGETS.md#sim-profiles). |
 | **Sim tick** *(engine)* | One fixed simulation step. See [BUDGETS.md](BUDGETS.md#simulation-constants). |
 | **SoA** | Structure of Arrays: one array per field. The hot data layout for ECS columns and GPU buffers. |
 | **Sparks** *(game)* | Meta currency, spent in the Workshop between runs. |
@@ -72,6 +72,5 @@ These terms are used across the Prophet engine docs and the SCRAPWAKE game docs.
 | **Sweep, the** *(game)* | Halcyon's automated "Clean Sweep" forces: every enemy in the game. |
 | **Swarm unit** *(engine)* | A deterministic entity in the GPU swarm: fodder, projectiles, pickups. GPU particles and debris voxel particles share the GPU but are cosmetic (floats allowed, excluded from determinism). |
 | **Threading tier** *(engine)* | `shared` (SharedArrayBuffer job system), `transfer` (transferable buffers, coarse jobs only) or `inline` (single thread, tests only). |
-| **TWA** | Trusted Web Activity: an Android app that runs our web build in Chrome. |
 | **Vertical slice** | The first shippable-quality slice of the game. See [VERTICAL-SLICE.md](VERTICAL-SLICE.md). |
 | **Workshop** *(game)* | The meta hub between runs, where Sparks buy permanent unlocks. |

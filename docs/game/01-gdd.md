@@ -22,8 +22,8 @@ Conventions:
 | Topic | Target |
 |---|---|
 | Genre | Survivors-like action roguelite + real-time tower defence and base building |
-| Audience | Players of Vampire Survivors, Brotato, Halls of Torment and Deep Rock Galactic: Survivor who want more agency; fans of Thronefall and Dome Keeper who want a bigger swarm. Core age 18–40; short-session PC, Steam Deck and mobile players. |
-| Platforms | Steam (Windows, macOS, Linux / Steam Deck) via Electron; free web demo; iOS and Android at 1.0 ([ADR-004](../DECISIONS.md#adr-004-one-web-build-electron-for-desktop), [ADR-005](../DECISIONS.md#adr-005-mobile-shells)) |
+| Audience | Players of Vampire Survivors, Brotato, Halls of Torment and Deep Rock Galactic: Survivor who want more agency; fans of Thronefall and Dome Keeper who want a bigger swarm. Core age 18–40; short-session PC and Steam Deck players. |
+| Platforms | Steam (Windows, macOS, Linux / Steam Deck) via Electron; free web demo; web portals at 1.0. Mobile is deferred until after 1.0 ([ADR-004](../DECISIONS.md#adr-004-one-web-build-electron-for-desktop), [ADR-024](../DECISIONS.md#adr-024-desktop-and-web-only)) |
 | Session length | Standard Cycle 20 min plus optional overtime; Blitz 10 min; Endless; Daily Seed ([Modes](#modes)). Checkpoints make every run suspendable ([Save policy](#save-policy)). |
 | Price | Premium, about $7–10 on Steam ([Business model](#business-model)) |
 
@@ -100,7 +100,7 @@ flowchart LR
 **Rules.**
 1. **Start.** PATCH reboots as a **husk** beside the Forge: a starting arm and a core, no legs, so it crawls and cannot dash. A legs cache is always placed a few tiles away, so the husk phase lasts ≤ 20 s.
 2. **Roaming.** The director spawns fodder in a ring just outside the view, Vampire Survivors-style, and specialists at mid range ([Director and pacing](#director-and-pacing)).
-3. **Distance pays.** Scrap drops are multiplied by *m(d) = 1 + d*, where *d* is the distance from the Forge divided by the district half-width (0 at the Forge, 1 at the edge). Cache rarity and elite chance also rise with *d*. Inside the **Yard** (the Forge's build radius), fodder drops ×0.5 outside assaults and no caches spawn. Because *d* is normalised, the smaller mobile district ([world constants](../BUDGETS.md#world-constants)) keeps the same pacing.
+3. **Distance pays.** Scrap drops are multiplied by *m(d) = 1 + d*, where *d* is the distance from the Forge divided by the district half-width (0 at the Forge, 1 at the edge). Cache rarity and elite chance also rise with *d*. Inside the **Yard** (the Forge's build radius), fodder drops ×0.5 outside assaults and no caches spawn.
 4. **Assaults.** A 30 s **siren** announces each assault with a **composition preview** (unit icons and counts), the **drop points**, and **predicted routes** sampled from the base field. On arrival, Sweep pods land at 1–3 drop points in the mid ring and their units converge on the Forge. Roaming spawns drop to 30 % while an assault is active.
 5. **Breacher Prime.** Every assault has exactly one. It drills straight at the Forge and arrives about 75 s after landing. **Only PATCH can damage it**; towers can only slow or stun it, at half duration. On arrival it detonates a breach charge that ignores the shield (20 % of Forge max HP), then keeps drilling (5 % every 2 s) until PATCH kills it. It drops a Military cache.
 6. **Forge shield.** When the first assault unit enters the Yard, the shield absorbs all damage to the Forge for 20 s, once per assault. Towers and walls are not shielded.
@@ -179,7 +179,7 @@ The starting PATCH (Mender Chassis) has a Rivet Driver on ARM R, a Cracked Core,
 | Crit | 5 % chance, ×1.5 damage |
 | Contact damage taken | Summed per tick from the swarm's contact accumulators, then reduced by armour |
 
-**UX per device.** Level-up and Assembly screens show a close-up paper doll. Stat diffs are icons plus signed numbers, never colour alone. KB/M: hover a hardpoint for details, click to set its mode. Gamepad: the D-pad cycles hardpoints. Touch: tap a hardpoint to open a bottom sheet. See [Assembly screen](04-ux-flows.md#assembly-screen).
+**UX per device.** Level-up and Assembly screens show a close-up paper doll. Stat diffs are icons plus signed numbers, never colour alone. KB/M: hover a hardpoint for details, click to set its mode. Gamepad: the D-pad cycles hardpoints. See [Assembly screen](04-ux-flows.md#assembly-screen).
 
 **Exploits & counters.**
 - *Swap-farming salvage:* caches are finite, and salvage feeds only the balance, never XP.
@@ -262,7 +262,6 @@ The starting PATCH (Mender Chassis) has a Rivet Driver on ARM R, a Cracked Core,
 **UX per device.**
 - KB/M: B opens build mode with a hotbar (1–6). Click to place, drag for wall lines, right-click to cancel.
 - Gamepad: hold LB for a radial (RB repeats the last blueprint). The ghost follows a right-stick cursor with tile snap; A places, B cancels, X toggles wall-line mode.
-- Touch: the build button opens a bottom sheet of blueprint cards. Drag a ghost into the world (a magnifier shows the tile), release, then confirm or cancel.
 
 Ghosts, ranges and progress bars are world-space UI drawn in WebGPU ([world-space UI](../engine/03-rendering.md#world-space-ui)). Flow: [build mode](04-ux-flows.md#build-mode).
 
@@ -445,9 +444,9 @@ During assaults, towers should deal 60–75 % of the damage and PATCH the rest, 
 ### Tier density
 
 A proposal, validated in M2′ and M6:
-- *ρ* (density factor) = the tier's on-screen design target ÷ the `high` target ([entity caps](../BUDGETS.md#entity-caps)), e.g. about 0.25 on `mobile`. It is part of the run's [sim profile](../BUDGETS.md#sim-profiles).
+- *ρ* (density factor) = the tier's on-screen design target ÷ the `high` target ([entity caps](../BUDGETS.md#entity-caps)), e.g. about 0.6 on `std`. It is part of the run's [sim profile](../BUDGETS.md#sim-profiles).
 - Fodder count × *ρ*; per-unit HP and damage × 1/√*ρ*; per-unit scrap and TP cost × 1/*ρ*.
-- Result: TP budgets, scrap income and threat are the same on every tier. Mobile gets fewer, tougher, richer fodder. AoE efficiency differs between tiers and must be checked.
+- Result: TP budgets, scrap income and threat are the same on every tier. `std` gets fewer, tougher, richer fodder. AoE efficiency differs between tiers and must be checked.
 - Co-op sessions use the lowest *ρ* among the peers.
 
 ### Level curve
@@ -571,25 +570,25 @@ Every Chassis starts with a Cracked Core. "Speed" modifies the move speed given 
 
 ## Controls
 
-| Action | Keyboard and mouse | Gamepad | Touch |
-|---|---|---|---|
-| Move | WASD | Left stick | Floating stick on the left |
-| Aim override | Hold left mouse (setting: always) | Right stick (twin-stick); auto-aim resumes 1 s after release | Auto-aim; optional twin-stick layout |
-| Dash | Space | A | Dash button |
-| Overclock | Q | RT | Overclock button (glows when full) |
-| Recall (2 s channel) | F | D-pad down | Recall button |
-| Build mode | B, or 1–6 to pick a blueprint | Hold LB for the radial; RB repeats the last blueprint | Build button → bottom sheet |
-| Place / cancel ghost | Left / right click; drag for wall lines | A / B; X toggles wall lines | Drag the ghost, release, then confirm or cancel |
-| Survey (ranges, assault routes) | Hold V | Hold LT | Automatic while the build sheet is open |
-| Interact (hold to compare) | E | X | Context button |
-| Level-up bank | Tab; 1–4 picks a card | Y | Tap the badge |
-| Assembly | I | View | Body button |
-| Rotate camera | Z / C | D-pad left / right | Two-finger twist |
-| Zoom | Mouse wheel | D-pad up (cycles) | Pinch |
-| Pause | Esc | Menu | Pause button |
+| Action | Keyboard and mouse | Gamepad |
+|---|---|---|
+| Move | WASD | Left stick |
+| Aim override | Hold left mouse (setting: always) | Right stick (twin-stick); auto-aim resumes 1 s after release |
+| Dash | Space | A |
+| Overclock | Q | RT |
+| Recall (2 s channel) | F | D-pad down |
+| Build mode | B, or 1–6 to pick a blueprint | Hold LB for the radial; RB repeats the last blueprint |
+| Place / cancel ghost | Left / right click; drag for wall lines | A / B; X toggles wall lines |
+| Survey (ranges, assault routes) | Hold V | Hold LT |
+| Interact (hold to compare) | E | X |
+| Level-up bank | Tab; 1–4 picks a card | Y |
+| Assembly | I | View |
+| Rotate camera | Z / C | D-pad left / right |
+| Zoom | Mouse wheel | D-pad up (cycles) |
+| Pause | Esc | Menu |
 
 - The camera yaw snaps in quarter turns, and zoom moves between fixed steps ([camera constants](../BUDGETS.md#pixel--camera-constants), [camera snapping](../engine/04-pixel-art-pipeline.md#camera-snapping)).
-- Button glyphs follow the last-used device, and every binding can be remapped. Touch targets respect the minimum size in [UI constants](../BUDGETS.md#ui-constants).
+- Button glyphs follow the last-used device, and every binding can be remapped. The Steam Deck uses the gamepad column.
 - Input architecture: [input](../engine/07-ui.md#input). Screen flows: [screen map](04-ux-flows.md#screen-map).
 
 ## Modes
@@ -653,8 +652,8 @@ Co-op is designed now and ships later: local play first, then online. Single-pla
 
 ([ADR-019](../DECISIONS.md#adr-019-fodder-is-not-saved), platform details in [saves](../engine/08-platforms.md#saves).)
 
-- **Meta and settings** are versioned JSON, saved at run end and on every Workshop change. They sync through Steam Cloud ([ADR-021](../DECISIONS.md#adr-021-steam-via-a-thin-ffi-shim)) and the Android cloud backup ([ADR-005](../DECISIONS.md#adr-005-mobile-shells)).
-- **Mid-run checkpoints** are written after each held assault and on a fixed timer ([cadence](../BUDGETS.md#world-constants)), plus on Save & Quit and when a mobile app is backgrounded.
+- **Meta and settings** are versioned JSON, saved at run end and on every Workshop change. They sync through Steam Cloud ([ADR-021](../DECISIONS.md#adr-021-steam-via-a-thin-ffi-shim)).
+- **Mid-run checkpoints** are written after each held assault and on a fixed timer ([cadence](../BUDGETS.md#world-constants)), plus on Save & Quit and when the system suspends (e.g. Steam Deck sleep).
 - **Saved:** PATCH (loadout, levels, HP, the bank with its pre-rolled cards, charges); towers and ghosts with build progress; the Forge (HP, Grade, upgrades, shield state); specialists, elites and bosses with their phase; the economy counters (total, balance, demolition *D*); the director (clock, intensity, event states, any rolled siren composition); the seed; voxel deltas; KPI stats.
 - **Not saved:** fodder, projectiles, particles, debris. On resume the director respawns fodder at the district's spawn edges, and PATCH gets a 3 s reboot grace. Resume time: [load targets](../BUDGETS.md#download--load-targets).
 - **Loose gems:** proposal: store them as merged gems per coarse cell (open question).
@@ -669,7 +668,7 @@ Co-op is designed now and ships later: local play first, then online. Single-pla
 | Motion | Screen-shake slider (0–100 %). Reduced motion turns off shake, camera bob and scanline animation, and replaces HUD tweens with fades. |
 | Vision and reading | UI scale ([range](../BUDGETS.md#ui-constants)), text size, damage numbers off or merged, a Blackout visibility floor |
 | Speed | Game speed 50 / 75 / 100 % in single-player. Such runs are flagged *Assisted*: they keep their Sparks but stay off leaderboards. |
-| Motor | Auto-aim on by default; hold or toggle for Recall, aim override, build mode and interact; full remapping on KB/M and gamepad; a touch layout editor; no quick-time events |
+| Motor | Auto-aim on by default; hold or toggle for Recall, aim override, build mode and interact; full remapping on KB/M and gamepad; no quick-time events |
 | Hearing | Directional captions for gameplay audio cues (siren, Sniper charge, drilling, collapse creaks); PATCH's bleeps captioned with an emotion tag; visual off-screen threat arrows |
 | Cognitive | Pause any time in single-player, banked level-ups, composition previews, a run log |
 
@@ -688,7 +687,6 @@ Implementation: [accessibility](../engine/07-ui.md#accessibility). Settings flow
 | FTUE completion | ≥ 85 % hold A1; ≥ 70 % start a second run | Slice, demo |
 | Building engagement | ≥ 3 towers by 10:00 in ≥ 90 % of runs; towers deal 60–75 % of assault damage | Telemetry |
 | Destruction engagement | ≥ 1 player-caused collapse per 2 min; collapse kills 5–15 % of kills | Telemetry |
-| Mobile retention | D1 ≥ 35 %, D7 ≥ 12 % (benchmarks to verify in M7) | Mobile soft launch |
 | Demo → wishlist conversion | Target set from benchmark research (to verify in M7) | Web demo |
 
 ## Business model
@@ -699,7 +697,6 @@ The model is an open decision, due before M7.
 |---|---|---|
 | Steam | Premium; Early Access → 1.0; about $7–10 | Early Access = the slice plus 1–2 districts, with a public roadmap |
 | Web | Free demo as a wishlist funnel | Rust Docks, Mender, Standard capped at 10:00 (it ends on the Demolisher); a wishlist call-to-action on the results screen |
-| Mobile | Premium, or free-to-play with optional ads | Digital goods through the store's billing ([ADR-005](../DECISIONS.md#adr-005-mobile-shells)) |
 
 Principles: **never pay-to-win**. Nothing purchasable or ad-rewarded changes a run's stats. No loot boxes. Cosmetics are optional.
 
@@ -770,7 +767,7 @@ This is a snapshot from **September 2026**. Review scores and prices come from S
 - **An unclaimed fantasy:** a robot whose body *is* the build, visibly losing and re-collecting parts ([Shatter](#core-loop)) in the middle of horde combat.
 - **Destruction as the economy:** demolition scrap, collapse kills, and Breachers tunnelling new routes.
 - **Price:** the ~$7–10 target ([Business model](#business-model)) sits between the $4.99 classics and the $12.99–14.99 hybrids. Revisit at M7 using wishlist and demo data.
-- **Mobile:** both proven models exist. Vampire Survivors is free with optional ads; DRG: Survivor and Halls of Torment are premium or try-then-buy.
+- **Mobile** waits until after 1.0 ([ADR-024](../DECISIONS.md#adr-024-desktop-and-web-only)). Both proven models exist for a later port: Vampire Survivors is free with optional ads; DRG: Survivor and Halls of Torment are premium or try-then-buy.
 - **Risks:**
   - Most hits earn heavily on consoles, which our web stack defers ([ROADMAP R18](../ROADMAP.md#risk-register)).
   - Co-op sells, as The Spell Brigade shows. That makes the co-op-ready architecture a strategic asset ([co-op rules](#co-op-rules)).
@@ -787,11 +784,9 @@ Sources:
 
 ## Open questions
 
-- **Tier density:** do fewer, tougher mobile fodder feel right, and how much does AoE efficiency shift (M2′/M6)? Should Daily Seed leaderboards split by tier family?
-- **Mobile Yard share:** the Yard is sized in tiles, so it covers a larger share of the smaller mobile district. Does Forge-time still land in 35–55 % on `mobile` (M6)?
+- **Tier density:** do fewer, tougher fodder feel right on `std`, and how much does AoE efficiency shift (M2′/M6)? Should Daily Seed leaderboards split by tier?
 - **Loose gems in checkpoints:** merged per cell, or dropped? To settle with [saves](../engine/08-platforms.md#saves).
 - **Blitz:** does it keep the full level curve (about 30 levels in 10 min), or cap near 20?
 - **Halcyon "tracked" drawback:** a fun trade-off or a frustration?
 - **Co-op:** a shared wallet or personal wallets online; local split-screen versus the leash.
 - **Overtime slope:** does 8–12 extra minutes for strong builds hold across Chassis?
-- **Mobile business model:** premium or free-to-play (M7).

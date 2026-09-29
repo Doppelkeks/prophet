@@ -1,22 +1,20 @@
 # Platforms & Packaging
 
-The web build is the product. Every platform runs it, either directly in a browser or inside a thin shell:
-- **Electron** on desktop
-- a **WKWebView host with an in-app localhost server** on iOS
-- a **Trusted Web Activity** on Android
+The web build is the product. Every platform runs it, either directly in a desktop browser or inside **Electron** on Windows, macOS, Linux and the Steam Deck. Mobile (iOS and Android apps, mobile browsers) is out of scope until after 1.0 ([ADR-024](../DECISIONS.md#adr-024-desktop-and-web-only)).
 
 This doc covers how each platform is packaged, how tiers are detected, how saves work, and how Steam is integrated. Platform facts were researched as of **September 2026**. Anything marked *(verify in M1)* goes into the M1 platform spike ([ROADMAP](../ROADMAP.md#milestones)).
 
 ## Goals
 
 - One build runs everywhere, with platform differences isolated in `engine/platform/` adapters and `platforms/` shells.
-- Store-ready packaging for Steam (Windows, macOS, Linux, Deck), the App Store, Google Play and web portals.
+- Store-ready packaging for Steam (Windows, macOS, Linux, Deck) and web portals.
 - The best threading tier each platform allows, chosen automatically, degrading gracefully when it isn't available.
 - Saves that survive updates, crashes and platform quirks.
 
 ## Non-goals
 
 - Consoles; this would need a new UI and GPU backend.
+- Mobile until after 1.0: no iOS or Android shells, and mobile browsers are not a target ([ADR-024](../DECISIONS.md#adr-024-desktop-and-web-only)).
 - A WebGL fallback ([ADR-003](../DECISIONS.md#adr-003-webgpu-only)).
 - Tauri or system-webview shells on desktop; revisit only if Electron blocks us ([ADR-004](../DECISIONS.md#adr-004-one-web-build-electron-for-desktop)).
 - The Mac App Store and the Microsoft Store at launch (see Open questions).
@@ -26,9 +24,8 @@ This doc covers how each platform is packaged, how tiers are detected, how saves
 | Need | Platform feature |
 |---|---|
 | Sell on Steam, including Steam Deck | Electron build, GPU switches, Steam shim, Deck layout |
-| Sell on iOS and Android | iOS host with a localhost server; Android TWA |
 | Web demo as a wishlist funnel | Static web build with COOP/COEP headers, a PWA, portal builds |
-| Mid-run suspend on phones | Lifecycle hooks, checkpoints ([ADR-019](../DECISIONS.md#adr-019-fodder-is-not-saved)) |
+| Mid-run suspend and resume (Steam Deck sleep) | Lifecycle hooks, checkpoints ([ADR-019](../DECISIONS.md#adr-019-fodder-is-not-saved)) |
 | Consistent performance across devices | Tier detection and dynamic caps |
 
 ---
@@ -38,20 +35,17 @@ This doc covers how each platform is packaged, how tiers are detected, how saves
 | Target | Shell | Threading tier | Engine placement | Notes |
 |---|---|---|---|---|
 | Chrome / Edge desktop | Browser | `shared` (with headers) | Engine worker; worker rAF | Reference web target |
-| Safari 26 (macOS, iPadOS) | Browser | `shared` (with headers) | Engine worker; **main-thread rAF ping** | Safari has no rAF in workers |
-| Firefox 141+ Windows, 145+ Apple Silicon | Browser | `shared` (with headers) | Engine worker | No WebGPU yet on Linux or Android |
+| Safari 26 (macOS) | Browser | `shared` (with headers) | Engine worker; **main-thread rAF ping** | Safari has no rAF in workers |
+| Firefox 141+ Windows, 145+ Apple Silicon | Browser | `shared` (with headers) | Engine worker | No WebGPU yet on Linux |
 | itch.io | Browser (iframe) | `shared` in Chromium and Firefox with the "SharedArrayBuffer support" option; `transfer` in Safari | Engine worker | Demo channel. Safari lacks `COEP: credentialless`, so offer a "pop-out" button for full threading. |
 | Other portals (Poki, CrazyGames, Newgrounds) | Browser (iframe) | `transfer`. Poki and CrazyGames don't document SharedArrayBuffer; Newgrounds has an opt-in checkbox *(verify)*. | Engine worker | Payload caps apply ([BUDGETS](../BUDGETS.md#download--load-targets)); WebGPU-only acceptance to verify |
 | Electron (Windows, macOS, Linux, Steam Deck) | Electron 44 / Chromium 152 | `shared` | Engine worker | Main commercial target |
-| iOS 26+ | WKWebView host + localhost server | `shared` | Engine worker; main-thread rAF ping | Requires the localhost server for cross-origin isolation |
-| Android 12+ | TWA in Chrome 121+ | `shared` | Engine worker | Primary Android path |
-| Android fallback | Own WebView host | `transfer` | Engine worker if WebGPU works there *(verify in M1)* | System WebView is never cross-origin isolated |
 
 ---
 
 ## Tier detection
 
-At boot, the engine picks a **performance tier** (`high`, `std` or `mobile`; see [BUDGETS: tiers](../BUDGETS.md#quality-tiers)) and a **threading tier** (`shared`, `transfer` or `inline`; see [02](02-core-ecs-jobs.md#threading-tiers)).
+At boot, the engine picks a **performance tier** (`high` or `std`; see [BUDGETS: tiers](../BUDGETS.md#quality-tiers)) and a **threading tier** (`shared`, `transfer` or `inline`; see [02](02-core-ecs-jobs.md#threading-tiers)).
 
 **Threading tier probes:**
 1. Is `crossOriginIsolated` true, and does `SharedArrayBuffer` exist?
@@ -63,7 +57,7 @@ At boot, the engine picks a **performance tier** (`high`, `std` or `mobile`; see
 **Performance tier inputs:**
 - `adapter.info` (vendor and architecture; it may be empty), the adapter limits and features.
 - `navigator.hardwareConcurrency`, and `navigator.deviceMemory` (Chrome only).
-- The shell flag (mobile shells force `mobile`) and the screen size.
+- The shell (browser or Electron; the Steam Deck defaults to `std`) and the screen size.
 - A **micro-benchmark** of at most 1.5 s: a swarm-like compute workload plus a fill test at internal resolution, timed with `timestamp-query` where available, otherwise with `onSubmittedWorkDone`.
 
 The result is cached per device and browser version. The user can override it in settings.
@@ -74,15 +68,17 @@ The result is cached per device and browser version. The user can override it in
 3. Bloom and fog quality.
 4. Offering the 30 fps mode. The sim stays at 60 Hz, so each frame runs 2 ticks.
 
-Nothing in this ladder changes simulation results. Anything that would (half-rate swarm, caps, K) belongs to the run's **sim profile** ([BUDGETS](../BUDGETS.md#sim-profiles)). The sim profile is fixed at run start and only changes between runs, for example when the settings screen suggests a lighter profile after a throttled run.
+Nothing in this ladder changes simulation results. Anything that would (caps, *K*, the swarm rate) belongs to the run's **sim profile** ([BUDGETS](../BUDGETS.md#sim-profiles)). The sim profile is fixed at run start and only changes between runs, for example when the settings screen suggests a lighter profile after a throttled run.
 
 ---
 
 ## Web
 
-- **Build output:**
+- **Build output** in `dist/web/` ([ADR-025](../DECISIONS.md#adr-025-worker-build-scheme-and-tool-pins)):
   - `index.html`
-  - entry chunks: main, engine worker, job worker
+  - three content-hashed bundles, built in dependency order: job worker, engine worker, main
+  - `_headers`, carrying the headers below for Cloudflare Pages and Netlify
+  - `build.json`, the build metadata
   - `assets/` (content-hashed)
   - `manifest.webmanifest`
   - `sw.js`
@@ -106,11 +102,11 @@ Nothing in this ladder changes simulation results. Anything that would (half-rat
     - No documented COOP/COEP.
     - Target initial download under 8 MB, which needs a slim portal payload built on procedural assets.
   - **CrazyGames:**
-    - Initial download ≤ 50 MB (≤ 20 MB for the mobile homepage).
+    - Initial download ≤ 50 MB.
     - Total ≤ 250 MB and ≤ 1,500 files.
     - Shared memory isn't documented.
   - **Newgrounds:** has a SharedArrayBuffer checkbox *(verify)*.
-  - **Chrome's `Document-Isolation-Policy`** header (desktop 137+, Android 146+) can isolate a page without COOP, but only when the host sends it.
+  - **Chrome's `Document-Isolation-Policy`** header (desktop 137+) can isolate a page without COOP, but only when the host sends it.
 
   Ask Poki and CrazyGames directly about WebGPU-only games before investing in portal builds.
 
@@ -118,7 +114,7 @@ Nothing in this ladder changes simulation results. Anything that would (half-rat
 
 ## Desktop: Electron
 
-**Baseline:** Electron 44 (Chromium 152). Each release pins an exact Electron version and runs the full device-lab pass before shipping.
+**Baseline:** Electron 44 (Chromium 152). Each release pins an exact Electron version (44.4.5 today, [ADR-025](../DECISIONS.md#adr-025-worker-build-scheme-and-tool-pins)) and runs the full device-lab pass before shipping.
 
 **Main process responsibilities:**
 - Create the window.
@@ -196,56 +192,6 @@ Steam builds update through Steam, not `electron-updater`.
 
 ---
 
-## iOS
-
-**Minimum:** iOS 26+, where WebGPU is on by default in WKWebView.
-
-**Host app.** Our own Swift template of roughly 300–500 lines. Capacitor 8 is acceptable if we need its plugins.
-
-**Web view:**
-- A full-screen `WKWebView` that respects safe areas.
-- Inline media, no bounce.
-- The status bar and home indicator are hidden during runs.
-
-**In-app HTTP server:**
-- It serves the **bundled** build on `127.0.0.1` at a random port, using `NWListener`, with COOP, COEP and CORP headers.
-- It is required because WebKit ignores COOP/COEP on custom schemes (`capacitor://` and friends). Without it, `crossOriginIsolated` is false and there is no shared memory.
-- This was verified on macOS 26.5 WebKit *(verify on iOS devices in M1)*.
-- The server restarts when the app returns to the foreground.
-
-**Native bridge:**
-- Lifecycle: pause and checkpoint on background, resume, memory warnings (which drop caches).
-- Haptics (`UIImpactFeedbackGenerator`).
-- Saves (files in Application Support, with optional iCloud).
-- Game Center (optional).
-- StoreKit, if the business model needs it.
-
-**App Store rules:**
-- A fully bundled game is fine under guideline 4.2.
-- Guideline 2.5.2 bans downloaded code, so **all JS ships inside the app**; remote content is data only.
-
-**Backgrounding** can lose the GPU device. Recovery is covered in [03](03-rendering.md#device-loss).
-
----
-
-## Android
-
-**Primary path: a Trusted Web Activity.**
-- Built with Bubblewrap 1.25, targeting API 36, which Google Play requires from 31 August 2026.
-- Needs a verified domain, via Digital Asset Links.
-- Runs in Chrome, which gives WebGPU on Android 12+ (Chrome 121+) and shared memory with our COOP/COEP headers.
-- A TWA **cannot bundle assets** in the APK:
-  - The service worker precaches everything on first launch, so the first launch needs a network connection.
-  - Its storage is shared with Chrome, so clearing Chrome's data wipes local saves. Meta saves therefore get a **cloud backup** (see [Saves](#saves)).
-- The TWA runs in the user's TWA-capable browser, which may not be Chrome. Capabilities are detected at runtime, with a "use Chrome for best results" hint when WebGPU is missing.
-- Digital goods go through Play Billing, using the Digital Goods API.
-
-**Fallback: our own WebView host.**
-- Android System WebView is **never** cross-origin isolated, so this host runs the `transfer` tier only.
-- WebGPU availability in WebView must be verified on real devices in M1.
-
----
-
 ## Saves
 
 | Data | Content | When written |
@@ -264,23 +210,21 @@ Steam builds update through Steam, not `electron-updater`.
 |---|---|
 | Web | IndexedDB, with `navigator.storage.persist()` requested |
 | Electron | Files in `app.getPath('userData')` through the preload; atomic writes (temp file + rename); Steam Auto-Cloud |
-| iOS | Native files through the bridge; optional iCloud |
-| Android TWA | IndexedDB plus the cloud backup of meta saves |
 
 **Robustness:** the last three versions of each save are kept. A corrupted or mismatched checksum falls back to the previous version, and the player gets a notice.
 
 ## Lifecycle
 
-- **Tab hidden, window minimized or app backgrounded:**
+- **Tab hidden, window minimized or system suspended (e.g. Steam Deck sleep):**
   - The simulation pauses.
   - Audio is suspended.
-  - A checkpoint is written (on mobile).
+  - A checkpoint is written when the system suspends.
   - The FrameDriver stops.
 - **Resume:**
   - If the device was lost, recover it.
-  - Restore audio. The AudioContext must be resumed from a user gesture on the web and on iOS.
+  - Restore audio. On the web, the AudioContext must be resumed from a user gesture.
   - The game stays paused until the player continues.
-- **Audio unlock.** The first user gesture creates and resumes the `AudioContext`. On iOS the audio session category is "ambient", so the game respects the silent switch, with an option to override it.
+- **Audio unlock.** The first user gesture creates and resumes the `AudioContext`.
 
 ---
 
@@ -288,7 +232,7 @@ Steam builds update through Steam, not `electron-updater`.
 
 | Resource | Owner |
 |---|---|
-| Platform bridge (Electron preload API, iOS/Android native bridges), save I/O, lifecycle events | Main thread |
+| Platform bridge (Electron preload API), save I/O, lifecycle events | Main thread |
 | Tier decisions (made once at boot), dynamic step-down | Engine worker |
 | Service worker (caching, cross-origin isolation fallback) | Browser service-worker context |
 
@@ -305,8 +249,6 @@ See [BUDGETS: download & load targets](../BUDGETS.md#download--load-targets) and
 | No cross-origin isolation | `transfer` tier; the game stays playable |
 | No WebGPU inside workers | Main-thread host, with mandatory [combat HUD rules](07-ui.md#combat-hud-rules) |
 | Storage quota exceeded | Prune the district asset caches first, never saves; warn the player |
-| TWA host browser lacks WebGPU | Message recommending Chrome, plus a link to the web demo requirements |
-| iOS localhost server fails to bind | Retry on a new port. After three failures, run the `transfer` tier from the bundled files. |
 
 ## Testing
 
@@ -319,13 +261,11 @@ See [BUDGETS: download & load targets](../BUDGETS.md#download--load-targets) and
   - device-loss recovery
   - pipeline warm-up time
 - **Electron smoke tests** via Playwright's Electron support: boot, the protocol headers (`crossOriginIsolated === true`), switch sets per OS, and the save round trip.
-- **Mobile:** real devices only (Safari Web Inspector, Chrome remote debugging). Scripted runs of boot, a checkpoint, background/foreground and resume.
+- **Steam Deck:** the real device. Scripted runs of boot, a checkpoint, suspend and resume.
 - **Web:** header checks against every deploy target, service-worker update flow tests, and the unsupported-browser screen.
 
 ## Open questions
 
-- iOS host: our own Swift template, or Capacitor 8? Decide in M1, based on which plugins we need.
-- Android WebView: WebGPU status, and whether the fallback host is worth shipping at all.
 - Do Poki and CrazyGames accept WebGPU-only games, and can they serve COOP/COEP? Neither is documented; ask them directly before M8.
 - Mac App Store and Microsoft Store: their sandboxing works with Electron but adds review overhead. Post-launch decision.
-- Cloud backup provider for Android and web meta saves: our own minimal endpoint or a platform service. Decide in M6.
+- Cloud backup for web meta saves: is it needed next to `navigator.storage.persist()`, and if so, our own minimal endpoint or a platform service? Decide in M6.

@@ -13,7 +13,7 @@ Status values:
 | [ADR-002](#adr-002-zero-runtime-dependencies) | Zero runtime dependencies | Accepted | — |
 | [ADR-003](#adr-003-webgpu-only) | WebGPU only, core feature level | Accepted | M1 |
 | [ADR-004](#adr-004-one-web-build-electron-for-desktop) | One web build; Electron for desktop | Accepted | M1 |
-| [ADR-005](#adr-005-mobile-shells) | Mobile shells: iOS host + localhost server, Android TWA | Accepted | M1, M8 |
+| [ADR-005](#adr-005-mobile-shells) | Mobile shells: iOS host + localhost server, Android TWA | Superseded by ADR-024 | — |
 | [ADR-006](#adr-006-real-htmlcss-ui) | Real HTML/CSS UI; world-space UI in WebGPU | Accepted | M5 |
 | [ADR-007](#adr-007-runtime-topology-and-framedriver) | Runtime topology and FrameDriver | Accepted | M1 |
 | [ADR-008](#adr-008-threading-tiers) | Threading tiers: shared / transfer / inline | Accepted | M1 |
@@ -32,6 +32,8 @@ Status values:
 | [ADR-021](#adr-021-steam-via-a-thin-ffi-shim) | Steam via a thin FFI shim | Proposed | M7 |
 | [ADR-022](#adr-022-scrap-is-both-xp-and-currency) | Scrap is both XP and currency | Proposed | M2′ |
 | [ADR-023](#adr-023-banked-level-ups-and-real-time-building) | Banked level-ups; real-time building | Proposed | M2′ |
+| [ADR-024](#adr-024-desktop-and-web-only) | Desktop and web only; mobile deferred until after 1.0 | Accepted | — |
+| [ADR-025](#adr-025-worker-build-scheme-and-tool-pins) | Worker build scheme and tool pins | Accepted | — |
 
 ---
 
@@ -68,8 +70,8 @@ Status values:
 **Decision:** The shipped engine and game code has **no npm dependencies**.
 
 Allowed:
-- **Dev and packaging tools:** `esbuild`, `electron`, `electron-builder`, `@playwright/test`, `typescript` (type-checking only), `@bubblewrap/cli`.
-- **Platform-edge code, isolated in `platforms/`:** a Steam FFI shim and, optionally, Capacitor on iOS.
+- **Dev and packaging tools:** `esbuild`, `electron`, `electron-builder`, `@playwright/test`, `typescript` (type-checking only), `@webgpu/types` (type declarations only). Pinned versions: [ADR-025](#adr-025-worker-build-scheme-and-tool-pins).
+- **Platform-edge code, isolated in `platforms/`:** a Steam FFI shim.
 
 **Consequences:**
 - We own and maintain every runtime piece: ECS, jobs, render graph, UI runtime (signals, components), audio mixer, `.vox` parser, procedural generation (PCG), math, save format.
@@ -81,9 +83,9 @@ Allowed:
 
 **Status:** Accepted. The support matrix is validated in M1.
 
-**Context:** The design is compute-heavy: swarm simulation, GPU culling, particles, light binning and procedural animation. That is not feasible on WebGL2 at our [entity caps](BUDGETS.md#entity-caps). WebGPU ships in:
+**Context:** The design is compute-heavy: swarm simulation, GPU culling, particles, light binning and procedural animation. That is not feasible on WebGL2 at our [entity caps](BUDGETS.md#entity-caps). On our desktop targets ([ADR-024](#adr-024-desktop-and-web-only)), WebGPU ships in:
 - Chrome and Edge
-- Safari 26 (macOS, iOS, iPadOS)
+- Safari 26 on macOS
 - Firefox on Windows and Apple Silicon
 
 Electron gives us a known Chromium on desktop.
@@ -91,16 +93,16 @@ Electron gives us a known Chromium on desktop.
 **Decision:**
 - WebGPU at the **core** feature level. No WebGL2 fallback, and no compatibility mode.
 - We stay within the **default limits** (see [engine/03-rendering.md](engine/03-rendering.md#webgpu-limits-policy)).
-- Optional features (`subgroups`, `shader-f16`, `timestamp-query`, `texture-compression-*`) are used only when present, and always have a fallback path.
+- Optional features (`subgroups`, `shader-f16`, `timestamp-query`, `texture-compression-bc`) are used only when present, and always have a fallback path.
 
 **Consequences:** This excludes:
-- iOS < 26
-- Firefox on Linux and Android (Nightly only as of Sep 2026)
-- Android devices without Vulkan or with not-yet-supported GPUs, roughly 10 % of Android users by Google's estimate
+- Safari before 26
+- Firefox on Linux (Nightly only as of Sep 2026)
+- Desktop GPUs and drivers that the browsers don't enable WebGPU for, e.g. Chrome on Linux outside the GPUs listed in [ADR-020](#adr-020-minimum-spec). The Electron app covers Linux AMD, including the Steam Deck, with switches.
 
 See [ADR-020](#adr-020-minimum-spec).
 
-**Revisit when:** web-demo or Android analytics (M7/M8) show material audience loss. The first lever is WebGPU **compatibility mode** (shipped in Chrome 146; opt in with `featureLevel: "compatibility"`), which reaches OpenGL ES 3.1 Android devices. It forbids vertex-stage storage buffers and caps workgroups at 128 invocations, so it would need an alternate vertex path and reduced caps. A reduced WebGL2 *demo* renderer is the last resort, never one for the full game.
+**Revisit when:** web-demo analytics (M7/M8) show material audience loss. The first lever is WebGPU **compatibility mode** (shipped in Chrome 146; opt in with `featureLevel: "compatibility"`), which reaches D3D11- and OpenGL ES 3.1-class GPUs. For us that only matters for low-end desktops and Chromebooks. It forbids vertex-stage storage buffers and caps workgroups at 128 invocations, so it would need an alternate vertex path and reduced caps. A reduced WebGL2 *demo* renderer is the last resort, never one for the full game.
 
 ## ADR-004: One web build, Electron for desktop
 
@@ -122,25 +124,11 @@ See [ADR-020](#adr-020-minimum-spec).
 
 ## ADR-005: Mobile shells
 
-**Status:** Accepted. Validated on real devices in M1 and shipped in M8.
+**Status:** Superseded by [ADR-024](#adr-024-desktop-and-web-only) on 2026-09-29.
 
-**Decision:**
-- **iOS 26+:** a thin WKWebView host app. It is our own Swift template; Capacitor 8 is acceptable if we need its plugins.
-  - It serves the *bundled* build from an **in-app `http://localhost` server** that sends COOP/COEP/CORP headers. WebKit ignores these headers on custom schemes such as `capacitor://`.
-  - The server restarts when the app returns to the foreground.
-- **Android:** a **Trusted Web Activity** (Bubblewrap). It runs our build in Chrome, which gives us WebGPU and SharedArrayBuffer. It requires:
-  - a verified domain (Digital Asset Links)
-  - a service worker that precaches all assets
-  - a cloud backup of meta saves, because a TWA's storage is shared with Chrome
-- **Android fallback:** our own WebView host. Android System WebView never supports cross-origin isolation, so this host runs only the `transfer` threading tier.
+**Was:** an iOS 26+ WKWebView host that served the bundled build from an in-app `http://localhost` server, and an Android Trusted Web Activity with our own WebView host as a `transfer`-tier fallback.
 
-**Consequences:**
-- Android needs hosting and a first-launch download.
-- iOS needs a small native host that we maintain.
-- Apple guideline 2.5.2 forbids downloaded code, so all JS is bundled into the app.
-- Digital goods on Android go through Play Billing.
-
-**Revisit when:** Android WebView gains cross-origin isolation, or the M1 matrix shows TWA hosts vary too much between devices.
+**Findings kept for a post-1.0 revisit:** WebKit ignores COOP/COEP on custom schemes, so an iOS host needs the localhost server to get shared memory. Android System WebView is never cross-origin isolated. A TWA cannot bundle assets, and it shares its storage with Chrome.
 
 ## ADR-006: Real HTML/CSS UI
 
@@ -157,7 +145,7 @@ See [ADR-020](#adr-020-minimum-spec).
 - ➖ DOM work must never block the simulation, which is why the engine runs in a worker.
 - ➖ A console port would need a different UI backend.
 
-**Revisit when:** the mobile HUD budget can't be met. The response is to move more of the HUD into WebGPU.
+**Revisit when:** the main-thread HUD budget can't be met on `std` hardware such as the Steam Deck. The response is to move more of the HUD into WebGPU.
 
 ## ADR-007: Runtime topology and FrameDriver
 
@@ -185,7 +173,7 @@ Details: [engine/01-overview.md](engine/01-overview.md#runtime-topology).
 | Tier | What runs in parallel |
 |---|---|
 | `shared` | SharedArrayBuffer job system: parallel ECS plus async jobs |
-| `transfer` | Coarse async jobs only (PCG, flow fields, connectivity, meshing), passed as transferable `ArrayBuffer`s |
+| `transfer` | Coarse async jobs only (PCG, flow fields, connectivity, meshing), passed as transferable `ArrayBuffer`s. Used where the page isn't cross-origin isolated: web portals, e.g. Safari on itch.io. |
 | `inline` | Nothing; everything on one thread. For tests only. |
 
 **Consequences:**
@@ -202,7 +190,7 @@ Details: [engine/01-overview.md](engine/01-overview.md#runtime-topology).
 - Every thread creates its typed-array views once.
 - Component IDs come from a **generated manifest**. The archetype and column tables live in the heap together with an **epoch** counter.
 
-**Context:** Growing a memory detaches every non-shared view. With shared memory, growth leaves stale-length views in every worker. Large `maximum` reservations fail on mobile.
+**Context:** Growing a memory detaches every non-shared view. With shared memory, growth leaves stale-length views in every worker. Large `maximum` reservations can fail on memory-constrained devices.
 
 **Consequences:**
 - Caps are fixed up front, and every arena needs an overflow policy.
@@ -219,7 +207,7 @@ Details: [engine/01-overview.md](engine/01-overview.md#runtime-topology).
 - Async work always runs on job workers: PCG, flow fields, connectivity, meshing.
 
 **Context:**
-- Waking a thread costs ~50–500 µs on mobile, so fork/join doesn't pay off for small systems.
+- Waking a sleeping thread costs tens to hundreds of µs, so fork/join doesn't pay off for small systems.
 - CPU actor counts are small because fodder lives on the GPU ([ADR-011](#adr-011-two-tier-simulation)).
 
 **Consequences:**
@@ -282,7 +270,7 @@ Rules: [engine/09-determinism-coop.md](engine/09-determinism-coop.md).
 **Decision:**
 - The simulation runs at a 60 Hz fixed tick, and rendering is interpolated between ticks.
 - At most a fixed number of ticks run per rendered frame. Past that, the game slows down instead of spiralling.
-- On mobile, the swarm can run at half rate.
+- A half-rate swarm is kept only as a reserve setting for the `std` sim profile, fixed for a whole run. v1 doesn't use it.
 
 Values: [BUDGETS.md](BUDGETS.md#simulation-constants).
 
@@ -296,7 +284,7 @@ Values: [BUDGETS.md](BUDGETS.md#simulation-constants).
 
 **Decision:**
 - Voxels are 0.25 m, encoded as 1 byte: a 6-bit material and a 2-bit damage stage.
-- Voxels are stored in 32³ chunks, with a smaller district size on mobile and a cap on dense chunks.
+- Voxels are stored in 32³ chunks, with one district size for every tier and a cap on dense chunks.
 - Untouched chunks are regenerated from the seed, so saves store only deltas.
 
 Values: [BUDGETS.md](BUDGETS.md#world-constants).
@@ -367,7 +355,7 @@ Values: [BUDGETS.md](BUDGETS.md#pixel--camera-constants).
 **Status:** Accepted.
 
 **Decision:**
-- Mid-run checkpoints store CPU actors, the economy, voxel deltas and the director's state. They are taken after each assault and on a timer.
+- Mid-run checkpoints store CPU actors, the economy, voxel deltas and the director's state. They are taken after each assault, on a timer, and when the system suspends (e.g. Steam Deck sleep).
 - Fodder, projectiles and particles are dropped. On resume, the director respawns fodder at the district's spawn edges.
 
 **Consequences:**
@@ -379,17 +367,13 @@ Values: [BUDGETS.md](BUDGETS.md#pixel--camera-constants).
 **Status:** Accepted. Re-checked in M1 and before each launch.
 
 **Decision:**
-- **Browsers:**
+- **Desktop browsers:**
   - Chrome/Edge 113+ on Windows, macOS and ChromeOS.
   - Chrome on Linux where WebGPU is enabled by default (144+ with Intel Gen12+; 147+ with NVIDIA on Wayland).
-  - Chrome on Android 12+:
-    - 121+ for Qualcomm and ARM GPUs
-    - 139+ for Imagination
-    - Samsung Xclipse expected around 154
-  - Safari 26+ on macOS, iOS and iPadOS (Safari 27 shipped in September 2026).
+  - Safari 26+ on macOS (Safari 27 shipped in September 2026).
   - Firefox 141+ on Windows, and 145+ on Apple Silicon with macOS 26 (147+ on every macOS version).
-- **Desktop app:** Electron 44 on the OS versions Electron supports, including SteamOS with the switches from [ADR-004](#adr-004-one-web-build-electron-for-desktop).
-- **Phones:** iPhone 13 (A15) or newer on iOS 26, and Android phones with Chrome-supported WebGPU GPUs.
+- **Desktop app:** Electron 44 on Windows, macOS, Linux and SteamOS (Steam Deck), within the OS versions Electron supports, with the switches from [ADR-004](#adr-004-one-web-build-electron-for-desktop).
+- **Phones and tablets:** not supported until after 1.0 ([ADR-024](#adr-024-desktop-and-web-only)).
 
 **Consequences:** The store pages and the web demo's "unsupported" screen must state these requirements clearly.
 
@@ -430,8 +414,64 @@ Values: [BUDGETS.md](BUDGETS.md#pixel--camera-constants).
 - **Level-ups queue up** instead of interrupting play. The player opens them at any time (single-player pauses while the menu is open) or at auto-prompts during lulls.
 - **Building** means placing blueprint ghosts, which **Forge drones construct in real time**. The game never slows down for building.
 
-**Context:** Modal level-ups and slow-motion building break co-op and are awkward on touch screens.
+**Context:** Modal level-ups and slow-motion building break co-op.
 
 **Consequences:**
-- The design stays co-op compatible and touch-friendly.
+- The design stays co-op compatible.
 - The UI needs more states: a pending-level-up badge, and ghosts that are under construction.
+
+## ADR-024: Desktop and web only
+
+**Status:** Accepted (user decision, 2026-09-29). Supersedes [ADR-005](#adr-005-mobile-shells).
+
+**Context:** Mobile added two native shells, a third performance tier with its own sim profile (a smaller district, a larger *K*, a half-rate swarm), a touch UI and two store policies. The commercial target is Steam, with the web build as the demo funnel ([GDD: business model](game/01-gdd.md#business-model)).
+
+**Decision:**
+- Targets are **desktop browsers** and the **Electron** desktop app on Windows, macOS, Linux and the Steam Deck ([ADR-004](#adr-004-one-web-build-electron-for-desktop), [ADR-020](#adr-020-minimum-spec)).
+- **Out of scope until after 1.0:** iOS and Android apps, mobile browsers as a target, a `mobile` performance tier, and touch UI.
+- Two performance tiers remain, `high` and `std`, with one district size ([BUDGETS: quality tiers](BUDGETS.md#quality-tiers)).
+- Input is keyboard + mouse and gamepad, including the Steam Deck's controls.
+
+**Consequences:**
+- ➕ One district size and one *K* for every tier, and fewer sim profiles to prove deterministic.
+- ➕ No native shells, store reviews or phone thermal budgets. M1 and M6 lose their mobile proofs.
+- ➕ UI and UX are designed for two input families instead of three.
+- ➖ No mobile revenue at 1.0, although survivors-likes sell well on mobile ([GDD: competitive landscape](game/01-gdd.md#competitive-landscape)).
+- ➖ Mobile browsers are neither tested nor tuned, and get no touch controls.
+
+**Revisit when:** after 1.0, with revenue data and the web demo's mobile traffic in hand. [ADR-005](#adr-005-mobile-shells) keeps the findings to start from.
+
+## ADR-025: Worker build scheme and tool pins
+
+**Status:** Accepted (implementation decision, 2026-09-29).
+
+**Context:**
+- Development has no build step ([ADR-001](#adr-001-pure-class-based-javascript)), but release needs minified, content-hashed bundles for three roles: main thread, engine worker and job worker.
+- esbuild does not bundle workers referenced through `new URL()`, so a bundle can't learn its workers' hashed file names by itself.
+- Minification renames classes, so `Class.name` is not a stable identity.
+
+**Decision:**
+- **Development:** native ES modules and module workers (`new Worker(url, { type: 'module' })`), with no bundling.
+- **Release:** esbuild runs three times, in dependency order: job worker → engine worker → main. Each pass `define`s `PX_BUILD` with the hashed URLs of the workers it launches.
+- **WGSL** is inlined into the engine-worker bundle as a `{ path: source }` map. Development fetches the same paths.
+- **Output:** the build writes `dist/web/` with `index.html`, `_headers` (COOP/COEP/CORP for static hosts) and `build.json` (build metadata), next to the hashed bundles.
+- **Manifest order** ([02](engine/02-core-ecs-jobs.md#component-manifest)) uses explicit `static key` strings, never `Class.name`, which minification renames.
+- **Tool pins** (dev dependencies only, [ADR-002](#adr-002-zero-runtime-dependencies)):
+
+| Tool | Version | Note |
+|---|---|---|
+| `esbuild` | 0.28.2 | Release bundler |
+| `typescript` | 6.0.3 | `checkJs` only. TypeScript 7 is the Go port; revisit later. |
+| `@webgpu/types` | 0.1.74 | WebGPU type declarations for the JSDoc checks; dev only |
+| `@playwright/test` | 1.56.1 | Matches the preinstalled Chromium revision 1194 (Chrome 141) |
+| `electron` | 44.4.5 | Desktop shell ([ADR-004](#adr-004-one-web-build-electron-for-desktop)) |
+
+Details: [engine/10-tooling-testing.md](engine/10-tooling-testing.md#build).
+
+**Consequences:**
+- ➕ Development keeps its zero-build loop, and release builds fetch no shaders at runtime.
+- ➕ Worker URLs are content-hashed, so a cached worker bundle from an older build is never loaded by mistake.
+- ➖ The three bundles share no chunks: code used by several roles is duplicated in each.
+- ➖ Every class the manifest numbers must declare a unique `static key`.
+
+**Revisit when:** esbuild bundles worker references itself, or TypeScript 7 supports our `checkJs` setup.

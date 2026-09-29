@@ -29,7 +29,7 @@ This doc covers how Prophet drives WebGPU: device setup, the render graph, the l
 | Readable chaos | ID buffer for outlines, x-ray silhouettes, world-space UI |
 | Instant hit feedback | Flashes, damage numbers and sparks spawned on the GPU |
 | Director, economy and audio react to the swarm | Readback ring: counters, events, density maps |
-| Phones that background the app | Device-loss recovery, per-tier sizes |
+| A run survives a driver reset or GPU-process crash | Device-loss recovery |
 
 ## Device and features
 
@@ -37,7 +37,7 @@ Startup runs on the engine worker, which owns the device for its whole life:
 
 1. `navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })`. `featureLevel` stays at its default, `'core'`; we never ask for compatibility mode ([ADR-003](../DECISIONS.md#adr-003-webgpu-only)). Some platforms ignore `powerPreference` (to verify in M1).
 2. Read `adapter.info` (vendor, architecture, description) and `adapter.limits`. Both feed [tier detection](08-platforms.md#tier-detection) with the micro-benchmark ([BUDGETS](../BUDGETS.md#quality-tiers)). Limits are *read*, never requested.
-3. `adapter.requestDevice({ requiredFeatures })` with only the table's features that the adapter reports, and **no `requiredLimits`**. The device runs at default limits even on a high-end GPU, so a limit bug that would hit phones also hits the dev machine.
+3. `adapter.requestDevice({ requiredFeatures })` with only the table's features that the adapter reports, and **no `requiredLimits`**. The device runs at default limits even on a high-end GPU, so a limit bug that would hit a low-end GPU also hits the dev machine.
 4. Configure the OffscreenCanvas context with `navigator.gpu.getPreferredCanvasFormat()` and `alphaMode: 'opaque'`. The browser composites the DOM UI above the canvas.
 5. Install the `device.lost` and `uncapturederror` handlers ([Device loss](#device-loss)).
 
@@ -46,8 +46,7 @@ Startup runs on the engine worker, which owns the device for its whole life:
 | `subgroups` | Prefix scans in swarm binning and culling compaction; reductions in light binning | Workgroup-memory scans. Integer results are identical, only slower. |
 | `shader-f16` | Render-only math; packed particle and instance attributes | `f32`. Never used in simulation kernels. |
 | `timestamp-query` | Per-pass GPU timings ([Profiling](#profiling)) | CPU timers plus `onSubmittedWorkDone` |
-| `texture-compression-bc` | Large non-palette textures on desktop | Uncompressed `rgba8unorm` |
-| `texture-compression-etc2`, `texture-compression-astc` | The same on mobile | Uncompressed `rgba8unorm` |
+| `texture-compression-bc` | Large non-palette textures | Uncompressed `rgba8unorm` |
 
 Rules for optional features:
 - **Defines.** Each feature maps to a WGSL preprocessor define (`SUBGROUPS`, `F16`). The define set is part of the pipeline-cache key.
@@ -312,7 +311,7 @@ World-anchored UI is drawn in WebGPU, never in the DOM ([ADR-006](../DECISIONS.m
 | Damage numbers | A GPU ring appended by the swarm hit pass; the CPU for actor hits | Pixel-font atlas; can be switched off ([07](07-ui.md#accessibility)) |
 | Tower ranges | Build mode, selection | Pixel rings |
 | Blueprint ghosts | Build mode | Tower meshes in a flat hologram style; parts behind geometry are dithered, not hidden |
-| Threat arrows | Director and actors | Off-screen indicators clamped to the safe area ([04](04-pixel-art-pipeline.md#resolution-and-scaling)) |
+| Threat arrows | Director and actors | Off-screen indicators clamped to the edge of the view ([04](04-pixel-art-pipeline.md#resolution-and-scaling)) |
 
 - One UI pixel is k × k output pixels, so bars and glyphs match the world's pixel size. They are anchored with the exact, unsnapped camera, so they track the world smoothly.
 - Where occlusion matters, world-space UI reads the internal-resolution depth buffer with `textureLoad`.
@@ -371,7 +370,7 @@ The `mapAsync` promise and the `getMappedRange()` buffer are the only per-frame 
 
 ## Device loss
 
-`device.lost` resolves after a driver reset, a GPU-process crash (Chromium, Electron), backgrounding on phones, or `device.destroy()` in tests. The engine emits a typed `device-lost` event ([01](01-overview.md#javascript-conventions)) and recovers:
+`device.lost` resolves after a driver reset, a GPU-process crash (Chromium, Electron), or `device.destroy()` in tests. The engine emits a typed `device-lost` event ([01](01-overview.md#javascript-conventions)) and recovers:
 
 1. **Freeze** the simulation at the current tick; no tick runs without a device. The DOM shows a "reconnecting" state.
 2. **Drop** in-flight readback slots. In single-player, the lost ticks' events count as empty. In co-op, a device loss forces a resync ([09](09-determinism-coop.md#co-op-model)).
@@ -383,7 +382,7 @@ The `mapAsync` promise and the `getMappedRange()` buffer are the only per-frame 
 8. **Swarm:** fodder, projectiles and particles are gone, and the director respawns fodder at the spawn edges ([ADR-019](../DECISIONS.md#adr-019-fodder-is-not-saved)). Uncollected pickups are not lost: their total value is known exactly from the counters, and it is respawned as merged gems near PATCH ([05: resets and device loss](05-gpu-swarm.md#resets-and-device-loss)).
 9. **Resume** once the visible chunks are meshed.
 
-**iOS backgrounding.** WebKit may drop the device while the app is in the background (to verify in M1). The host forwards lifecycle events ([08](08-platforms.md#ios)); the engine pauses, stops submitting, and treats a loss on return as expected. The in-app localhost server restarts on foreground ([ADR-005](../DECISIONS.md#adr-005-mobile-shells)).
+**Hidden or suspended.** While the tab is hidden, the window is minimized or the Steam Deck sleeps, the engine pauses and stops submitting ([08: lifecycle](08-platforms.md#lifecycle)). A loss on return is expected and recovered as above.
 
 Repeated losses in a short window drop one performance tier. A persistent failure shows an error screen with a report.
 
@@ -398,7 +397,7 @@ Repeated losses in a short window drop one performance tier. A persistent failur
 |---|---|
 | Engine worker | Owns the `GPUDevice`, the OffscreenCanvas context, the render graph, pipeline cache, mesh-pool allocator and readback ring. It is the only thread that calls WebGPU. |
 | Job workers | Produce CPU data only (packed quads, PCG light lists). They never touch WebGPU. |
-| Main thread | Transfers the canvas to the engine worker once at boot; measures size, DPR and safe areas ([04](04-pixel-art-pipeline.md#resolution-and-scaling)); forwards visibility and lifecycle events. |
+| Main thread | Transfers the canvas to the engine worker once at boot; measures size and DPR ([04](04-pixel-art-pipeline.md#resolution-and-scaling)); forwards visibility and lifecycle events. |
 | Main-thread host | Runs the same classes on the main thread when WebGPU is unavailable in workers ([01](01-overview.md#runtime-topology)). |
 
 Presentation timing on Safari, which has no worker rAF, is to verify in M1.
@@ -437,7 +436,7 @@ Presentation timing on Safari, which has no worker rAF, is to verify in M1.
 ## Open questions
 
 - What are the exact G-buffer formats? Do object ID, face code and class bits fit one `r32uint` (see [04](04-pixel-art-pipeline.md#outlines))?
-- Index-less six-vertex quads, or four vertices plus a shared static index buffer? Measure vertex cost on mobile.
+- Index-less six-vertex quads, or four vertices plus a shared static index buffer? Measure vertex cost on the Steam Deck.
 - Are render bundles for chunk draws worth it once draw counts are measured?
 - Should fodder cast shadow-map shadows instead of blob shadows?
 - Should the shadow map split static and dynamic casters, re-rendering voxels only when the camera moves a texel?

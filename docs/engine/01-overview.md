@@ -1,6 +1,6 @@
 # Prophet Engine: Overview
 
-Prophet is a from-scratch 3D game engine written in **pure, class-based JavaScript**. It runs on **WebGPU**, uses **Web Workers** for multithreading, and draws its UI with **real HTML/CSS**. One web build ships to browsers, to desktop through Electron, and to mobile through thin native shells. The first game built on it is **SCRAPWAKE** ([GDD](../game/01-gdd.md)).
+Prophet is a from-scratch 3D game engine written in **pure, class-based JavaScript**. It runs on **WebGPU**, uses **Web Workers** for multithreading, and draws its UI with **real HTML/CSS**. One web build ships to desktop browsers and, through Electron, to Windows, macOS, Linux and the Steam Deck. The first game built on it is **SCRAPWAKE** ([GDD](../game/01-gdd.md)).
 
 The other engine docs cover one subsystem each:
 
@@ -12,7 +12,7 @@ The other engine docs cover one subsystem each:
 | [05-gpu-swarm](05-gpu-swarm.md) | The GPU-resident swarm and the CPU↔GPU contract |
 | [06-world](06-world.md) | Voxels, destruction, collision, navigation, procedural generation |
 | [07-ui](07-ui.md) | DOM UI architecture, state bridge, CSS system, input, accessibility |
-| [08-platforms](08-platforms.md) | Web, Electron, iOS, Android, Steam, saves, tier detection |
+| [08-platforms](08-platforms.md) | Web, Electron, Steam, saves, tier detection |
 | [09-determinism-coop](09-determinism-coop.md) | Integer simulation, RNG, replays, co-op model |
 | [10-tooling-testing](10-tooling-testing.md) | Dev server, build, asset pipeline, dev tools, tests, CI |
 
@@ -23,7 +23,7 @@ All numbers live in [BUDGETS.md](../BUDGETS.md). Decisions and their rationale l
 ## Goals
 
 1. **Performance first.** Work that is massively parallel runs as WebGPU compute. CPU work is data-oriented, and it is multithreaded wherever that measurably pays off.
-2. **One build, every platform.** The web platform is the portability layer, covering browsers, Electron, the iOS host and the Android TWA ([ADR-004](../DECISIONS.md#adr-004-one-web-build-electron-for-desktop), [ADR-005](../DECISIONS.md#adr-005-mobile-shells)).
+2. **One build, every platform.** The web platform is the portability layer, covering desktop browsers and Electron ([ADR-004](../DECISIONS.md#adr-004-one-web-build-electron-for-desktop), [ADR-024](../DECISIONS.md#adr-024-desktop-and-web-only)).
 3. **Own the stack.** Zero runtime dependencies ([ADR-002](../DECISIONS.md#adr-002-zero-runtime-dependencies)).
 4. **Fast iteration.** No build step in development. WGSL, CSS and data hot-reload, and every UI is real HTML/CSS in the browser DevTools.
 5. **Deterministic by construction.** The simulation is integer-only, so replays, bug reproduction and future co-op all work ([ADR-012](../DECISIONS.md#adr-012-integer-deterministic-simulation)).
@@ -32,6 +32,7 @@ All numbers live in [BUDGETS.md](../BUDGETS.md). Decisions and their rationale l
 
 - A general-purpose editor à la Unity or Godot. In-game dev tools and data files are enough for one game.
 - A WebGL fallback, consoles or VR ([ADR-003](../DECISIONS.md#adr-003-webgpu-only)).
+- Mobile: iOS and Android apps, mobile browsers and touch UI wait until after 1.0 ([ADR-024](../DECISIONS.md#adr-024-desktop-and-web-only)).
 - Photorealistic PBR, skeletal skinning or cloth. Characters are rigid voxel parts with procedural animation.
 - Networking. The design is co-op-*ready* ([09-determinism-coop](09-determinism-coop.md)), but no netcode ships in v1.
 - A scripting language. Game code is plain JS modules.
@@ -47,8 +48,8 @@ Each engine feature exists because SCRAPWAKE needs it. When a feature has no row
 | Base building and tower defence | Flow fields with wall costs, build grid, towers as actors, targeting on the GPU | [05](05-gpu-swarm.md), [06](06-world.md) |
 | Robot that visibly assembles itself | Part-socket rendering, procedural animation, 16-direction facing | [03](03-rendering.md), [04](04-pixel-art-pipeline.md) |
 | Stylized 3D pixel art with neon | Pixel-exact projection, toon ramps, outlines, LUT, clustered lights, pixel bloom | [04](04-pixel-art-pipeline.md), [03](03-rendering.md) |
-| Modern neon UI on every device | DOM UI with custom elements, seqlocked state bridge, touch and gamepad input | [07](07-ui.md) |
-| Sell on web, Steam, App Store and Play | Platform layer, tier detection, saves, Steam shim | [08](08-platforms.md) |
+| Modern neon UI on every device | DOM UI with custom elements, seqlocked state bridge, keyboard, mouse and gamepad input | [07](07-ui.md) |
+| Sell on Steam, with a web demo and portals | Platform layer, tier detection, saves, Steam shim | [08](08-platforms.md) |
 | Procedural roguelite districts | Seeded, deterministic, worker-parallel generation | [06](06-world.md#procedural-generation) |
 | Co-op later without a rewrite | Integer lockstep-capable simulation, command-driven input | [09](09-determinism-coop.md) |
 
@@ -95,7 +96,7 @@ flowchart LR
 
 | Thread | Owns | Never does | Talks via |
 |---|---|---|---|
-| **Main** | DOM, CSS, input events, Gamepad API polling, `AudioContext`, platform bridge (Electron preload, iOS host) | Simulation, WebGPU calls, blocking waits | Input ring and state block (shared memory), `postMessage` for commands and events |
+| **Main** | DOM, CSS, input events, Gamepad API polling, `AudioContext`, platform bridge (Electron preload) | Simulation, WebGPU calls, blocking waits | Input ring and state block (shared memory), `postMessage` for commands and events |
 | **Engine worker** | Fixed-step sim, ECS, voxel authority, the WebGPU device (via OffscreenCanvas), render graph, readback ring | Blocking waits. It helps drain jobs, then yields to its event loop. | Everything above, plus the job queue |
 | **Job workers** | Stateless kernels over heap regions or transferred buffers | DOM, WebGPU, owning state | Shared-memory job queue with `Atomics.wait/notify`, or transferables in the `transfer` tier |
 
@@ -161,7 +162,7 @@ When the frame budget is exceeded, the engine first drops optional work in this 
 
 ## Repository layout (proposed)
 
-This layout is proposed for later milestones. No code is written in M0.
+The layout that M1 started to fill. Directories for later milestones are still proposals.
 
 ```
 prophet/
@@ -176,12 +177,13 @@ prophet/
 │   ├── nav/                # nav grid, flow fields
 │   ├── pcg/                # generator framework, noise, grammars, prefab assembly
 │   ├── audio/              # buses, voices, music stems (main-thread side + event ring)
-│   ├── input/              # action maps, devices, touch model
+│   ├── input/              # action maps, devices
 │   ├── ui/                 # UI runtime: signals, UiElement base class, state-block reader, bridge
 │   ├── assets/             # manifest, loaders, .vox parser, hot reload
-│   ├── platform/           # web / electron / ios / android adapters (storage, lifecycle, tiers)
-│   └── app/                # bootstrap: main entry, engine-worker entry, job-worker entry
+│   ├── platform/           # web / electron adapters (probes, tiers, worker URLs, storage, lifecycle)
+│   └── app/                # hosts: main-thread host, engine-worker host, headless SimCore
 ├── game/                   # SCRAPWAKE
+│   ├── app/                # the only entry points: main, engine worker, job worker
 │   ├── components/         # component classes (static schemas)
 │   ├── systems/sim/        # deterministic simulation systems (integer-only, linted)
 │   ├── systems/view/       # render/extract-only systems (floats allowed)
@@ -189,11 +191,9 @@ prophet/
 │   ├── shaders/render/     # WGSL render and post shaders
 │   └── pcg/  data/  ui/  assets/
 ├── platforms/
-│   ├── electron/           # main.js, preload.js, protocol + switches, builder config, Steam shim
-│   ├── ios/                # WKWebView host + localhost server (Swift)
-│   └── android/            # TWA (Bubblewrap) config, asset links
-├── tools/                  # dev server, build, asset cooker, manifest generator
-├── tests/                  # unit (node:test), browser (Playwright), perf, replay hashes
+│   └── electron/           # main.js, preload.cjs, app:// protocol, GPU switches, builder config, Steam shim
+├── tools/                  # dev server, sim lint, build, generators, asset cooker
+├── tests/                  # unit (node:test), browser (Playwright), electron, perf, replay hashes
 └── docs/
 ```
 
@@ -206,7 +206,7 @@ prophet/
 
 ## JavaScript conventions
 
-- **Modules:** ES modules only. Every file starts with `// @ts-check`, and public APIs carry JSDoc types.
+- **Modules:** ES modules only. Every file starts with `// @ts-check`, and public APIs carry JSDoc types. Development loads the modules natively, workers included; release builds bundle one file per role ([ADR-025](../DECISIONS.md#adr-025-worker-build-scheme-and-tool-pins)).
 - **Files and classes:** one primary class per file, with the file named after the class in kebab-case.
 - **Naming:**
   - `PascalCase` for classes.
@@ -275,15 +275,14 @@ These rules apply to per-tick and per-frame code. Code review checks them, and a
 | Category | Allowed | Examples |
 |---|---|---|
 | Engine and game runtime | **Nothing external** | — |
-| Dev tooling | Small and replaceable | `esbuild` (bundling/minifying), `typescript` (checkJs only), `@playwright/test` |
-| Packaging | Per platform | `electron`, `electron-builder`, `@bubblewrap/cli` |
-| Platform edge (`platforms/`) | Isolated behind an interface | Steam FFI shim; optionally Capacitor on iOS |
+| Dev tooling | Small and replaceable; versions pinned in [ADR-025](../DECISIONS.md#adr-025-worker-build-scheme-and-tool-pins) | `esbuild` (bundling/minifying), `typescript` (checkJs only), `@webgpu/types` (type declarations), `@playwright/test` |
+| Packaging | Per platform | `electron`, `electron-builder` |
+| Platform edge (`platforms/`) | Isolated behind an interface | Steam FFI shim |
 | Content tools | External apps, not code | MagicaVoxel for voxel models, a DAW for audio, font tools |
 
 Adding anything to the runtime requires a new ADR.
 
 ## Open questions
 
-- In release builds, should workers load bundled per-role entry files (engine, job) or a shared chunk graph? Bundle sizes will decide this in M1.
-- Should the engine expose a tiny plugin API for platform features (haptics, achievements), or keep one adapter class per platform? This is decided in M5.
+- Should the engine expose a tiny plugin API for platform features (rumble, achievements), or keep one adapter class per platform? This is decided in M5.
 - How much of the "main-thread host" fallback do we keep once the M1 matrix shows where it is actually needed?

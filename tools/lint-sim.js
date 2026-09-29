@@ -7,7 +7,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** Directories (relative, '/'-separated) whose JS is simulation code. */
+/** Directories (relative, '/'-separated) whose JS is simulation code. Any `sim/` directory under engine/ is too. */
 export const SIM_JS_SCOPES = ['engine/swarm/reference/', 'game/systems/sim/'];
 /** Individual sim JS files outside those directories. */
 export const SIM_JS_FILES = ['engine/core/fixed.js', 'engine/core/rng.js', 'engine/core/hash32.js', 'engine/app/sim-core.js'];
@@ -83,7 +83,9 @@ export function stripCode(src, wgsl) {
 export function lintSource(path, src) {
   const problems = [];
   const isWgsl = path.endsWith('.wgsl');
-  const inSimJs = !isWgsl && (SIM_JS_FILES.includes(path) || SIM_JS_SCOPES.some((s) => path.startsWith(s)));
+  const inSimJs =
+    !isWgsl &&
+    (SIM_JS_FILES.includes(path) || SIM_JS_SCOPES.some((s) => path.startsWith(s)) || (path.startsWith('engine/') && path.includes('/sim/')));
   const inSimWgsl = isWgsl && SIM_WGSL_SCOPES.some((s) => path.startsWith(s));
   const rawLines = src.split('\n');
   const codeLines = stripCode(src, isWgsl).split('\n');

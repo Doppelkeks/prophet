@@ -1,10 +1,10 @@
 # Prophet
 
-**Prophet** is a from-scratch, GPU-first 3D game engine in **pure, class-based JavaScript**. It runs on **WebGPU compute**, uses **Web Workers** for multithreading, and draws its UI with **real HTML/CSS**. One web build ships to browsers, Steam (via Electron), the App Store and Google Play.
+**Prophet** is a from-scratch, GPU-first 3D game engine in **pure, class-based JavaScript**. It runs on **WebGPU compute**, uses **Web Workers** for multithreading, and draws its UI with **real HTML/CSS**. One web build ships to desktop browsers and, through Electron, to Steam on Windows, macOS, Linux and Steam Deck.
 
 **SCRAPWAKE** is its first game: a roguelite that crosses Vampire Survivors with tower defence, set in a fully destructible voxel cyberpunk city. You play a broken robot that rebuilds itself from the scrap it finds.
 
-> **Status: M0 Concept.** This repository contains the design and architecture docs only. No code yet. The docs are the contract for the first milestones ([ROADMAP](docs/ROADMAP.md)).
+> **Status: M1 in progress.** The engine foundation is being built increment by increment on top of the M0 concept docs, which remain the contract ([ROADMAP](docs/ROADMAP.md)). The first target is a playable tech demo: PATCH against a GPU swarm, in the browser and in Electron.
 
 ---
 
@@ -39,7 +39,7 @@ In the megacity **Meridian**, the corporation **HALCYON** runs "Clean Sweep" dro
 | **World** | 0.25 m voxels, structural-graph collapse, flow-field navigation, seeded procedural districts. |
 | **Look** | Pixel-exact 3D pixel art: integer-scaled low-res render, outlines, toon ramps, palette LUT, neon bloom. |
 | **UI** | Real DOM with custom elements and modern CSS (flexbox, grid, container queries, `:has()`), fed by a seqlocked state bridge. |
-| **Platforms** | Web (PWA), Electron (Windows, macOS, Linux, Steam Deck), iOS 26+ WKWebView host, Android TWA. |
+| **Platforms** | Web (desktop browsers, PWA) and Electron (Windows, macOS, Linux, Steam Deck). Mobile is deferred until after 1.0 ([ADR-024](docs/DECISIONS.md#adr-024-desktop-and-web-only)). |
 
 ## Read the docs
 
@@ -64,23 +64,23 @@ In the megacity **Meridian**, the corporation **HALCYON** runs "Clean Sweep" dro
 | [05 GPU swarm](docs/engine/05-gpu-swarm.md) | The GPU-resident swarm and the CPU-GPU contract |
 | [06 World](docs/engine/06-world.md) | Voxels, destruction, collision, navigation, procedural generation |
 | [07 UI](docs/engine/07-ui.md) | DOM architecture, state bridge, CSS system, input, accessibility |
-| [08 Platforms](docs/engine/08-platforms.md) | Web, Electron, iOS, Android, Steam, saves, tier detection |
+| [08 Platforms](docs/engine/08-platforms.md) | Web, Electron, Steam, saves, tier detection |
 | [09 Determinism & co-op](docs/engine/09-determinism-coop.md) | Integer simulation, RNG, replays, co-op model |
 | [10 Tooling & testing](docs/engine/10-tooling-testing.md) | Dev server, build, asset pipeline, dev tools, tests, CI |
 | **Game** | |
 | [01 GDD](docs/game/01-gdd.md) | Loop, body-as-loadout, economy, base and towers, destruction, enemies, pacing, balance, meta, KPIs, market |
 | [02 Content](docs/game/02-content.md) | Parts, chips, fusions, towers, enemies, bosses, districts, events |
 | [03 Art & audio](docs/game/03-art-audio.md) | Palette, scale, lighting, characters, VFX, UI look, HUD wireframes, audio |
-| [04 UX flows](docs/game/04-ux-flows.md) | Screens and flows for keyboard/mouse, gamepad and touch |
+| [04 UX flows](docs/game/04-ux-flows.md) | Screens and flows for keyboard/mouse and gamepad |
 
 ## Minimum spec (summary)
 
-Any browser with WebGPU:
+Any desktop browser with WebGPU:
 - Chrome/Edge 113+
-- Safari 26+ on macOS and iOS
+- Safari 26+ on macOS
 - Firefox 141+ on Windows, 145+ on Apple Silicon
 
-Plus the desktop app (Electron) on Windows, macOS, Linux and Steam Deck, iPhone 13 or newer on iOS 26, and recent Android phones through Chrome. Details: [ADR-020](docs/DECISIONS.md#adr-020-minimum-spec).
+Plus the desktop app (Electron 44) on Windows, macOS, Linux and Steam Deck. Phones and tablets are not supported before 1.0. Details: [ADR-020](docs/DECISIONS.md#adr-020-minimum-spec).
 
 ## Roadmap (summary)
 
@@ -91,21 +91,35 @@ Plus the desktop app (Electron) on Windows, macOS, Linux and Steam Deck, iPhone 
 5. **M5:** Minimum Viable Engine.
 6. **M6:** vertical slice.
 7. **M7:** Steam Early Access + web demo.
-8. **M8:** 1.0 + mobile stores + portals.
+8. **M8:** 1.0 + web portals.
 
 Details and exit metrics: [ROADMAP](docs/ROADMAP.md).
 
-## Repository layout (planned)
+## Quick start
+
+Needs Node 22 and a browser with WebGPU.
+
+```sh
+npm ci
+npm run dev             # http://localhost:4173 (COOP/COEP headers, live reload)
+npm run check           # typecheck + sim lint + unit tests
+npm run test:browser    # Playwright + headless Chromium with WebGPU
+npm run electron:dev    # the desktop shell, serving the repo
+```
+
+Working rules for contributors (and coding agents) are in [CLAUDE.md](CLAUDE.md).
+
+## Repository layout
 
 ```
 engine/     Prophet: pure JS, zero runtime dependencies
-game/       SCRAPWAKE: components, systems, shaders, UI, data, assets
-platforms/  electron/ · ios/ · android/
-tools/      dev server, build, asset cooker, generators
-tests/      unit · browser (WebGPU) · perf · replay
-docs/       this concept
+game/       SCRAPWAKE: entry points, components, systems, shaders, UI, data
+platforms/  electron/
+tools/      dev server, sim lint, generators (build and asset cooker to come)
+tests/      unit (node:test) · browser (Playwright + WebGPU) · electron
+docs/       the concept and the specs
 ```
 
 ## License
 
-To be decided before the first code lands.
+All rights reserved (proprietary). See [LICENSE](LICENSE).

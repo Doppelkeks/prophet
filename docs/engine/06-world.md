@@ -38,7 +38,7 @@ This doc covers voxel storage, edits and damage, structural collapse, kinematic 
 
 ## Voxel storage
 
-A district is a 3D grid of voxel chunks. The voxel size, chunk size, district dimensions, chunk counts and the dense-chunk cap per tier are in [BUDGETS](../BUDGETS.md#world-constants).
+A district is a 3D grid of voxel chunks. The voxel size, chunk size, district dimensions, chunk count and the dense-chunk cap are in [BUDGETS](../BUDGETS.md#world-constants). Every tier uses the same district size.
 
 **Voxel byte.** `material = v & 0x3F` and `stage = v >> 6`. Material 0 is air. Stages run from 0 (intact) to 3 (critical); see [Edits and damage](#edits-and-damage).
 
@@ -406,7 +406,7 @@ Per threading tier:
 
 ## Budgets
 
-- World constants (voxel size, chunks, district sizes, dense cap, grids, buckets, breach width): [BUDGETS](../BUDGETS.md#world-constants).
+- World constants (voxel size, chunks, district size, dense cap, grids, buckets, breach width): [BUDGETS](../BUDGETS.md#world-constants).
 - Remesh, field-solve, generation and collapse budgets, and job-worker counts: [BUDGETS](../BUDGETS.md#job-workers-asynchronous-work).
 - Voxel, navigation and PCG arenas: [BUDGETS](../BUDGETS.md#shared-heap). Voxel mesh pool: [BUDGETS](../BUDGETS.md#gpu-memory).
 - Debris particles, towers, lights: [BUDGETS](../BUDGETS.md#entity-caps).

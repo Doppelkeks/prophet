@@ -7,7 +7,7 @@ This doc covers how Prophet and SCRAPWAKE are developed, built, checked and meas
 - **Fast iteration.** Save a WGSL, CSS or JSON file and see the change in under a second, without restarting the run.
 - **Reproducible builds.** Same commit + same toolchain lock = the same bundle bytes.
 - **Automated guardrails** for the things that silently rot: frame budgets, determinism, the combat HUD rules, and bans on non-deterministic APIs in sim code.
-- **A small toolchain.** Node, esbuild and Playwright, plus TypeScript for checking only ([ADR-002](../DECISIONS.md#adr-002-zero-runtime-dependencies)).
+- **A small toolchain.** Node, esbuild and Playwright, plus TypeScript for checking only ([ADR-002](../DECISIONS.md#adr-002-zero-runtime-dependencies)), at [pinned versions](#tool-pins).
 
 ## Non-goals
 
@@ -42,29 +42,39 @@ This doc covers how Prophet and SCRAPWAKE are developed, built, checked and meas
 | `*.vox`, source art | Re-cook through the [asset pipeline](#asset-pipeline), then reload the affected models or kits |
 | `*.js` | Full reload, then **restart the run with the same seed and replay the command log** up to the current tick. Determinism lets you keep testing from roughly where you were ([09](09-determinism-coop.md#replays-and-hashes)). |
 
-- **Testing on phones.** Shared memory needs a secure context:
-  - **Android:** `adb reverse tcp:PORT tcp:PORT`, then open `http://localhost:PORT` in Chrome on the device.
-  - **iOS:** the dev build of the host app can point its web view at the dev server (a debug-only setting). Remote inspection works through Safari Web Inspector.
-
 ## Build
 
-- **Bundler:** esbuild, a dev dependency, configured as follows:
-  - Entry points: `main`, `engine-worker` and `job-worker`.
-  - Output: ES modules with code splitting, minification and content-hashed filenames.
+The scheme is [ADR-025](../DECISIONS.md#adr-025-worker-build-scheme-and-tool-pins).
+
+- **Development** has no build step. The browser loads native ES modules, workers are module workers (`new Worker(url, { type: 'module' })`), and shaders are fetched as `.wgsl` files by path.
+- **Release bundling:** esbuild, a dev dependency, runs **three passes in dependency order**: `job-worker` → `engine-worker` → `main`.
+  - Each pass bundles one entry point into one minified file with a content-hashed name.
+  - esbuild does not bundle workers referenced through `new URL()`. Each pass therefore `define`s `PX_BUILD` with the hashed URLs of the workers it launches, which is why the order is fixed.
   - `define: { DEV: false }`, which strips asserts and dev tools.
-  - WGSL files are imported as text.
+  - WGSL is inlined into the engine-worker bundle as a `{ path: source }` map. Development fetches the same paths, so shader lookups are identical in both modes.
 - **Outputs:**
-  - `dist/web/`, the static site ([08](08-platforms.md#web)).
+  - `dist/web/`, the static site ([08](08-platforms.md#web)): the three bundles plus `index.html`, `_headers` (COOP/COEP/CORP for static hosts) and `build.json` (build metadata).
   - The Electron app, which copies `dist/web/` into its resources and adds the main and preload scripts.
-  - Mobile shell payloads: the iOS host bundle and the Android TWA project (Bubblewrap).
 - **Reproducibility.** Every build pins its inputs:
-  - `package-lock.json`
+  - `package-lock.json`, with the [tool pins](#tool-pins) below
   - Node, from `.nvmrc`
   - Electron, as an exact version
   - the Playwright browsers
 
-  Build metadata records the git SHA and a hash of the cooked assets.
+  `build.json` records the git SHA and a hash of the cooked assets.
 - **Build hash.** This hash goes into saves and replays, so incompatible replays are detected ([09](09-determinism-coop.md#replays-and-hashes)).
+
+### Tool pins
+
+All are dev dependencies ([ADR-002](../DECISIONS.md#adr-002-zero-runtime-dependencies)), pinned to exact versions.
+
+| Tool | Version | Notes |
+|---|---|---|
+| `esbuild` | 0.28.2 | The release bundler |
+| `typescript` | 6.0.3 | `tsc --checkJs --noEmit` only. TypeScript 7 is the Go port; revisit later. |
+| `@webgpu/types` | 0.1.74 | WebGPU type declarations for the JSDoc checks |
+| `@playwright/test` | 1.56.1 | Matches the preinstalled Chromium revision 1194 (Chrome 141) |
+| `electron` | 44.4.5 | The desktop shell ([08](08-platforms.md#desktop-electron)) |
 
 ---
 
@@ -110,7 +120,7 @@ Dev tools ship in dev builds only. They are DOM custom elements, loaded lazily w
 | **Unit** | `node --test`, pure JS, fast | Fixed-point math and trig LUT; RNG hash; arena allocators; ECS (archetype moves, queries, change ticks); command-buffer ordering; scheduler (serial vs parallel give identical results); job system on `worker_threads` + SharedArrayBuffer; seqlock; signals; flow fields on known maps; voxel edits; structural collapse scenarios; PCG determinism (hash per seed) |
 | **GPU** | Playwright + Chromium headless (`--enable-unsafe-webgpu`, SwiftShader in CI) | Every pipeline variant compiles; **swarm kernels vs the JS reference implementation** give bit-identical state hashes ([05](05-gpu-swarm.md#reference-implementation)); readback-ring behaviour; device-loss recovery |
 | **Visual** | Playwright golden images | Pixel pipeline stages; **crawl tests**: sub-pixel camera pans must produce pure integer translations ([04](04-pixel-art-pipeline.md#look-dev-tests)) |
-| **UI** | Playwright | Screenshots per screen and device profile; keyboard, touch and synthetic-gamepad flows; pseudo-locale; combat-HUD performance ([07](07-ui.md#testing)) |
+| **UI** | Playwright | Screenshots per screen and device profile; keyboard, mouse and synthetic-gamepad flows; pseudo-locale; combat-HUD performance ([07](07-ui.md#testing)) |
 | **Replay** | Playwright + headless build | Recorded runs replayed; state hashes every N ticks must match the recorded ones (level L1 in CI; L2 on the device lab; [09](09-determinism-coop.md#determinism-levels)) |
 | **Performance** | Bench scenes in headless builds | Swarm stress, destruction stress, UI stress, district generation, flow-field solve, compared with [BUDGETS](../BUDGETS.md) |
 | **Soak** | Nightly | 30-minute scripted runs: memory growth, GC pauses, event overflow, arena high-water marks |
@@ -126,10 +136,9 @@ Dev tools ship in dev builds only. They are DOM custom elements, loaded lazily w
 
 **Sim-code API lint.** A small zero-dependency script enforces the [rules for sim code](09-determinism-coop.md#rules-for-sim-code) ([ADR-012](../DECISIONS.md#adr-012-integer-deterministic-simulation)).
 
-- **Scope:** only simulation code.
-  - `engine/**/sim/`
-  - `game/systems/sim/`
-  - the WGSL kernels in `game/shaders/sim/` and `engine/swarm/`
+- **Scope:** only simulation code (the lists live in `tools/lint-sim.js`).
+  - JS: `engine/swarm/reference/`, `game/systems/sim/`, any `sim/` directory under `engine/`, and the sim helpers `engine/core/fixed.js`, `rng.js` and `hash32.js` plus `engine/app/sim-core.js`
+  - WGSL: the kernels in `engine/swarm/kernels/` and `game/shaders/sim/`
 
   Render-only code (`game/systems/view/`, `game/shaders/render/`) may use floats and is not scanned.
 - **Banned in JS sim code:**
@@ -138,6 +147,7 @@ Dev tools ship in dev builds only. They are DOM custom elements, loaded lazily w
   - `Intl` and `localeCompare`
   - `WeakRef` and `FinalizationRegistry`
   - float typed arrays (`Float32Array`, `Float64Array`) on sim state
+  - a bare `/`: integer division goes through `Fixed.idiv` (or `Fixed.udiv`), which has WGSL semantics ([09](09-determinism-coop.md#overflow-safe-arithmetic))
 - **Banned in WGSL sim kernels:** float types and literals, float atomics, and non-integer built-ins.
 - **Enforcement:** any hit fails CI. An exception needs an explicit, reviewed `// sim-allow: <reason>` comment on the line.
 
@@ -168,7 +178,6 @@ GitHub Actions workflows:
 - **Channels:**
   - Steam: branches (`beta`, `default`), with depots uploaded via `steamcmd`, scripted in CI from M7.
   - Web: preview → staging → production.
-  - Mobile: TestFlight and a Play internal track.
 - **Changelogs** are generated from conventional commit messages and edited by hand for players.
 
 ---

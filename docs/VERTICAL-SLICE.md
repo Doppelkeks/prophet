@@ -46,10 +46,11 @@ Content *counts* per release live in the [GDD: Slice vs 1.0](game/01-gdd.md#slic
 
 | Platform | Slice status |
 |---|---|
-| Web: Chrome/Edge, Safari 26+, Firefox (Windows) | Full target, meeting the quality gates |
+| Web: Chrome/Edge, Safari 26+ (macOS), Firefox (Windows) | Full target, meeting the quality gates |
 | Electron: Windows, macOS, Linux, **Steam Deck** | Full target, meeting the quality gates |
-| iOS host (localhost server), Android TWA | **Technical proof**: a full run is playable, with checkpoint and resume; performance within the `mobile` budgets on the reference phones |
 | Portals, Steam integration, store packaging | Not in the slice (M7/M8) |
+
+Mobile is out of scope until after 1.0 ([ADR-024](DECISIONS.md#adr-024-desktop-and-web-only)).
 
 ---
 
@@ -66,10 +67,10 @@ The MVE is the smallest engine that can ship this slice. Everything in the **Def
 | GPU swarm ([05](engine/05-gpu-swarm.md)) | The full pass chain; fire commands with target policies; area effects; the status vocabulary; counters, events and maps; the JS reference implementation | — |
 | World ([06](engine/06-world.md)) | Voxel storage, edits and damage; structural graphs, collapse and kinematic debris; character controller; raycasts; base and player flow fields; procedural generation for Rust Docks | The other district themes |
 | Determinism ([09](engine/09-determinism-coop.md)) | Integer sim rules plus the lint; input as commands; async commits at fixed ticks; replays and state hashes (L1 in CI, L2 on the lab) | Networking and co-op sessions |
-| UI ([07](engine/07-ui.md)) | `UiElement`, signals, router, seqlocked state bridge, combat HUD rules, the screens above, keyboard/mouse + gamepad + touch input, glyph switching, accessibility baseline | CJK fonts; View Transitions polish |
+| UI ([07](engine/07-ui.md)) | `UiElement`, signals, router, seqlocked state bridge, combat HUD rules, the screens above, keyboard/mouse + gamepad input, glyph switching, accessibility baseline | CJK fonts; View Transitions polish |
 | Audio | Buses, pooled SFX with per-type caps, music stems, the audio event ring | AudioWorklet mixer |
-| Platforms ([08](engine/08-platforms.md)) | Web build with headers and a basic PWA; Electron builds (Windows, macOS, Linux, Deck switches); saves (settings, meta, checkpoints); lifecycle; iOS/Android technical shells | Steam shim (M7); store packaging (M8); portal adapters (M8) |
-| Tooling ([10](engine/10-tooling-testing.md)) | Dev server with hot reload; esbuild build; asset cooker (`.vox`, LUT, data validation, manifests); dev tools (perf overlay, ECS inspector, swarm/world/director tools, replay controls); every test layer; CI workflows `check`, `browser`, `build`, `preview` | Self-hosted GPU runner (optional) |
+| Platforms ([08](engine/08-platforms.md)) | Web build with headers and a basic PWA; Electron builds (Windows, macOS, Linux, Deck switches); saves (settings, meta, checkpoints); lifecycle | Steam shim and Steam packaging (M7); portal adapters (M8) |
+| Tooling ([10](engine/10-tooling-testing.md)) | Dev server with hot reload; the three-pass esbuild build ([ADR-025](DECISIONS.md#adr-025-worker-build-scheme-and-tool-pins)); asset cooker (`.vox`, LUT, data validation, manifests); dev tools (perf overlay, ECS inspector, swarm/world/director tools, replay controls); every test layer; CI workflows `check`, `browser`, `build`, `preview` | Self-hosted GPU runner (optional) |
 
 ---
 

@@ -23,7 +23,7 @@ Keep code and docs in sync.
 
 ## Rules
 
-- **Simulation code is integer-only**: `engine/**/sim/`, `engine/swarm/reference/`, `game/systems/sim/`, and the WGSL kernels in `engine/swarm/kernels/`.
+- **Simulation code is integer-only**: any `sim/` directory under `engine/`, `engine/swarm/reference/`, `game/systems/sim/`, the sim helpers in `engine/core/` (`fixed.js`, `rng.js`, `hash32.js`), `engine/app/sim-core.js`, and the WGSL kernels in `engine/swarm/kernels/` and `game/shaders/sim/`.
   - Use the `Fixed` and `Rng` helpers from `engine/core`.
   - No `Math.*` transcendentals, no floats, no `Date.now` or `performance.now`, no bare `/` (use `Fixed.idiv`).
   - `npm run lint:sim` enforces this. An exception needs `// sim-allow: <reason>` on the line.

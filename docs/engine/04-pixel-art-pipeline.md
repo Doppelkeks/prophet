@@ -13,7 +13,7 @@ Related docs:
 2. **Zero crawl.** When the camera pans, static pixels only move by whole output pixels. Nothing shimmers or "boils".
 3. **Readable hordes** at the design on-screen load ([BUDGETS](../BUDGETS.md#entity-caps)): orange reads as the player, cyan as the Sweep.
 4. **Neon that stays pixel-y.** Glow is chunky, and colors stay on the palette.
-5. **Cheap.** The whole post chain fits its GPU budget, phones included.
+5. **Cheap.** The whole post chain fits its GPU budget on every tier, the Steam Deck included.
 
 ## Non-goals
 
@@ -78,7 +78,7 @@ M4 takes the decision, using the [look-dev tests](#look-dev-tests).
 
 ## Resolution and scaling
 
-The scene renders at a low **internal resolution**, then an **integer factor *k*** upscales it with nearest-neighbor sampling. The formulas, the zoom heights and worked examples (1080p, 1440p, 4K, Steam Deck, iPhone 13) are in [BUDGETS](../BUDGETS.md#pixel--camera-constants).
+The scene renders at a low **internal resolution**, then an **integer factor *k*** upscales it with nearest-neighbor sampling. The formulas, the zoom heights and worked examples (1080p, 1440p, 4K, Steam Deck) are in [BUDGETS](../BUDGETS.md#pixel--camera-constants).
 
 - ***k*** comes from the canvas height and the zoom level's internal height, and is never below 1.
 - **Zoom** changes the internal height, and therefore *k*. It never changes the pixel density: the world is always drawn at the same px/m in internal pixels. Zooming out shows more world, with fewer output pixels per world pixel.
@@ -127,14 +127,7 @@ export class CanvasMeter {
 **Letterboxing and cropping.**
 - **Normal aspect ratios:** no letterboxing. The internal size follows the screen aspect.
 - **Ultrawide:** the visible world width is clamped to a maximum aspect (a tuning value, e.g. 21:9), so wide screens gain neither a tactical advantage nor extra GPU cost. Beyond it, the DOM draws decorated pillarbox bars.
-- **Portrait:** not supported in combat. The mobile shells lock landscape ([iOS](08-platforms.md#ios), [Android](08-platforms.md#android)).
 - **Small screens:** a screen shorter than the zoom height gets *k* = 1 and simply shows less world.
-
-**Mobile safe areas.**
-- The canvas fills the whole screen, under notches and home indicators.
-- The main thread passes the `env(safe-area-inset-*)` values to the engine worker, which converts them to internal pixels.
-- The camera frames PATCH in the center of the safe rectangle. Threat arrows and other world-space UI clamp to it.
-- The DOM HUD uses the same insets ([07](07-ui.md#css-architecture)).
 
 ## Camera snapping
 
@@ -246,7 +239,7 @@ flowchart TD
 - **Internal resolution.** Everything before the upscale runs at internal resolution. That keeps it cheap and keeps every effect on the pixel grid.
 - **World text** uses a pixel font drawn at *k*× ([03](03-rendering.md#world-space-ui)). It matches the world's pixel size and stays crisp.
 - **X-ray silhouettes** ([Occlusion handling](#occlusion-handling)) are written into the G-buffer as unlit, flat palette colors with their own class. Outlines skip them, and the LUT leaves them unchanged.
-- **Budget:** the post-processing + upscale and world-space UI rows in [BUDGETS](../BUDGETS.md#at-design-load), plus the mobile post ceiling in [BUDGETS](../BUDGETS.md#stress-ceiling-scene-m2-exit).
+- **Budget:** the post-processing + upscale and world-space UI rows in [BUDGETS](../BUDGETS.md#at-design-load).
 
 ## Occlusion handling
 
@@ -263,7 +256,7 @@ The oblique view hides the ground behind a building for 1× its height, and buil
 - They use a flat color: orange for PATCH and towers, and the enemy color code for elites.
 
 **Off-screen threat arrows.** Used for an incoming assault, an elite, the Prime Breacher, or the Forge under attack.
-- They are world-space UI at the safe-area edge ([03](03-rendering.md#world-space-ui)).
+- They are world-space UI at the edge of the view ([03](03-rendering.md#world-space-ui)).
 - They are shape-coded, so color is never the only cue ([accessibility](../game/01-gdd.md#accessibility)).
 
 **Dithered cutaway.** Used for a prop between the camera and PATCH:
@@ -280,8 +273,7 @@ M4 decides the projection ([ADR-018](../DECISIONS.md#adr-018-pixel-exact-project
 |---|---|---|
 | **Crawl test** | Golden-image camera pans over fixed scenes at sub-pixel speeds (e.g. 0.1, 0.37 and 1.5 internal px per frame), at all four yaws | In static regions every output frame is an exact integer translation of the previous one: zero differing pixels |
 | **Oblique vs orthographic** | The same scenes and pans in both projections | Crawl count, per-frame pixel churn on rotating characters, hidden-ground area, a readability panel |
-| **Brickmap raymarch spike** | Compute raymarch at internal resolution vs meshed rendering, on the same scenes | GPU time on `std` and `mobile`, memory, edit-to-visible latency, golden-image parity |
-| **Mobile post budget** | The full post chain on the mobile reference phones ([BUDGETS](../BUDGETS.md#reference-devices)) | Within the mobile post ceiling ([BUDGETS](../BUDGETS.md#stress-ceiling-scene-m2-exit)) |
+| **Brickmap raymarch spike** | Compute raymarch at internal resolution vs meshed rendering, on the same scenes | GPU time on `std`, memory, edit-to-visible latency, golden-image parity |
 | **Readability** | Playtest panels at the design on-screen swarm load ([BUDGETS](../BUDGETS.md#entity-caps)), plus colorblind simulations | Players spot PATCH, elites and the Breacher within a set time, in normal and colorblind views ([accessibility](../game/01-gdd.md#accessibility)) |
 
 The crawl test's integer-translation check needs no reference image. Given the known camera path, frame N shifted by the expected whole-pixel delta must equal frame N−1 wherever the static mask is set. That makes it cheap to run on every commit in CI.
@@ -291,7 +283,7 @@ The crawl test's integer-translation check needs no reference image. Given the k
 | Thread | Role |
 |---|---|
 | Engine worker | Every runtime pass: projection, snapping, post chain, world-space UI |
-| Main thread | Measures the canvas (size, DPR, safe areas) and posts it to the engine worker; the DOM UI sits above the canvas |
+| Main thread | Measures the canvas (size, DPR) and posts it to the engine worker; the DOM UI sits above the canvas |
 | Job workers | Nothing at runtime |
 | Asset cooker (offline) | LUT, ramp textures, micro-texture atlases, pixel-font atlas ([10](10-tooling-testing.md#asset-pipeline)) |
 
@@ -299,7 +291,6 @@ The crawl test's integer-translation check needs no reference image. Given the k
 
 - Pixel density, zoom heights, *k* formula, border, facings, pose rate, bands, LUT size, character heights: [BUDGETS](../BUDGETS.md#pixel--camera-constants).
 - GPU time for post-processing + upscale and for world-space UI: [BUDGETS](../BUDGETS.md#at-design-load).
-- Mobile post-processing ceiling (an M4 exit criterion): [BUDGETS](../BUDGETS.md#stress-ceiling-scene-m2-exit).
 - Render targets, textures, the LUT and fonts: [BUDGETS](../BUDGETS.md#gpu-memory).
 - Light caps that bound the toon resolve: [BUDGETS](../BUDGETS.md#entity-caps).
 
@@ -307,7 +298,7 @@ The crawl test's integer-translation check needs no reference image. Given the k
 
 | Situation | Response |
 |---|---|
-| Post chain over budget on `mobile` | Drop in this order: crease lines, bloom levels, dithered fog (flat fog instead), Bayer dither. Outlines stay, because they carry readability. |
+| Post chain over budget on `std` | Drop in this order: crease lines, bloom levels, dithered fog (flat fog instead), Bayer dither. Outlines stay, because they carry readability. |
 | Backing store not device-pixel exact (page zoom, odd DPR) | `image-rendering: pixelated` keeps the browser's resampling nearest-neighbor; dev builds warn |
 | Very small window | *k* = 1, and less world is visible |
 | M4 rejects the oblique projection | Switch to the orthographic variant: the same chain with a different matrix plus texel snapping. ADR-018 is superseded. |

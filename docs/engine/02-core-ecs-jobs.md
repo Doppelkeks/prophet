@@ -26,7 +26,7 @@ Prophet's CPU core has four parts that share one rule: **hot data lives in one f
 | A new district is ready moments after the player picks a Cycle; walls reshape paths; buildings collapse | PCG, flow-field and connectivity kernels on job workers, committed at fixed ticks |
 | No hitches during a whole Cycle | Fixed heap, arena allocators, no per-frame garbage |
 | Replays, bug reproduction, co-op later | Deterministic system order and command application; integer schemas |
-| Web portals and the Android WebView host have no shared memory | The `transfer` tier runs the same kernels on copies |
+| Web portals without cross-origin isolation (e.g. Safari on itch.io) have no shared memory | The `transfer` tier runs the same kernels on copies |
 
 ---
 
@@ -34,7 +34,7 @@ Prophet's CPU core has four parts that share one rule: **hot data lives in one f
 
 ### One fixed heap
 
-- The heap is one `WebAssembly.Memory`, created at boot with `initial` = `maximum` (in 64 KiB pages) and sized per performance tier ([BUDGETS: shared heap](../BUDGETS.md#shared-heap)). It is **never grown** ([ADR-009](../DECISIONS.md#adr-009-fixed-size-shared-heap)): growing detaches non-shared views and leaves stale-length views in other workers, and large `maximum` reservations fail on mobile.
+- The heap is one `WebAssembly.Memory`, created at boot with `initial` = `maximum` (in 64 KiB pages) and sized per performance tier ([BUDGETS: shared heap](../BUDGETS.md#shared-heap)). It is **never grown** ([ADR-009](../DECISIONS.md#adr-009-fixed-size-shared-heap)): growing detaches non-shared views and leaves stale-length views in other workers, and large `maximum` reservations can fail on memory-constrained devices.
 - It is `shared: true` only when the page is cross-origin isolated (the `shared` tier); otherwise it is private to the engine worker. A `WebAssembly.Memory`, rather than a bare `SharedArrayBuffer`, lets WASM SIMD kernels later run on the same bytes with no copies.
 - Offset 0 holds the **heap header**: a magic number and layout version, the manifest hash, the arena table (offset, size and allocator kind per arena), the layout epoch, and a few global atomic words (current tick, lane wake words).
 
@@ -64,9 +64,9 @@ Prophet's CPU core has four parts that share one rule: **hot data lives in one f
 
 ### Component manifest
 
-- `tools/gen-manifest.js` ([asset pipeline](10-tooling-testing.md#asset-pipeline)) collects every component class, sorts the classes by name, assigns IDs in that order, and hashes the names together with each canonical schema. The same generator numbers systems, event types, kernels and RNG streams.
+- `tools/gen-manifest.js` ([asset pipeline](10-tooling-testing.md#asset-pipeline)) collects every component class, sorts the classes by their explicit `static key` string, assigns IDs in that order, and hashes the keys together with each canonical schema. It never uses `Class.name`, which minification renames ([ADR-025](../DECISIONS.md#adr-025-worker-build-scheme-and-tool-pins)). The same generator numbers systems, event types, kernels and RNG streams.
 - The engine worker writes the manifest hash into the heap header. Each job worker compares it with the manifest it imported, and **refuses to run on a mismatch** (`manifest-mismatch`). The usual cause is a stale cached worker bundle.
-- IDs are stable within one build only. Saves serialize components by name, and replays carry the build hash ([09](09-determinism-coop.md#replays-and-hashes)), so raw IDs never leave the process.
+- IDs are stable within one build only. Saves serialize components by key, and replays carry the build hash ([09](09-determinism-coop.md#replays-and-hashes)), so raw IDs never leave the process.
 
 ---
 
@@ -264,7 +264,7 @@ The scheduler *can* split any system that iterates ECS chunks. It *does* so only
 | Async work: PCG, flow fields, meshing, connectivity | Always on job workers (in every tier except `inline`). Results that affect the sim commit at fixed ticks ([09](09-determinism-coop.md#async-results-at-fixed-ticks)). |
 
 **Why serial is the default:**
-- Waking a sleeping thread costs roughly 50–500 µs on mobile ([ADR-010](../DECISIONS.md#adr-010-archetype-ecs-with-profile-driven-parallelism)). Fork/join around a system that takes, e.g., 0.1 ms is a net loss.
+- Waking a sleeping thread costs tens to hundreds of µs ([ADR-010](../DECISIONS.md#adr-010-archetype-ecs-with-profile-driven-parallelism)). Fork/join around a system that takes, e.g., 0.1 ms is a net loss.
 - CPU actor counts are small, because fodder, projectiles and pickups live on the GPU ([ADR-011](../DECISIONS.md#adr-011-two-tier-simulation)). Most systems iterate a few hundred rows.
 
 **How a system becomes parallel:**
@@ -339,7 +339,7 @@ The threading tier is chosen once at boot from capability probes ([08: tier dete
 
 | | `shared` | `transfer` | `inline` |
 |---|---|---|---|
-| Chosen when | `crossOriginIsolated`, `SharedArrayBuffer` and workers are all available | Workers exist, but shared memory doesn't: the Android WebView host and most [web portals](08-platforms.md#web) | Tests only (`node:test`, reference runs). Never shipped. |
+| Chosen when | `crossOriginIsolated`, `SharedArrayBuffer` and workers are all available | Workers exist, but shared memory doesn't: most [web portals](08-platforms.md#web), e.g. Safari on itch.io | Tests only (`node:test`, reference runs). Never shipped. |
 | Heap | Shared `WebAssembly.Memory`, visible to every worker | Private to the engine worker | Private |
 | ECS systems | Serial or chunk-parallel | Serial only | Serial only |
 | Async jobs | Descriptors in the heap; kernels run in place | Regions copied into transferable `ArrayBuffer`s | Run synchronously when submitted |
@@ -417,7 +417,7 @@ Events let systems talk across entities without write conflicts.
 
 | Situation | Behavior |
 |---|---|
-| The heap can't be allocated at boot (low-memory device) | Retry with the next smaller heap profile and the matching performance tier. If the `mobile` profile fails too, show the unsupported-device screen. |
+| The heap can't be allocated at boot (low-memory device) | `high` and `std` share one heap size ([BUDGETS](../BUDGETS.md#shared-heap)), so there is no smaller profile to retry: show the unsupported-device screen. |
 | An arena is exhausted | The per-arena policy in the [arena table](#arenas-and-allocators); always a typed `heap-arena-exhausted` event; dev builds assert |
 | Manifest hash mismatch in a worker | The worker refuses to start. The engine reloads the worker bundle once with a cache-busting URL, then shows an update prompt. |
 | A kernel throws, or a worker hangs or dies | The worker loop catches exceptions and marks the job failed; a stale heartbeat word gets the worker terminated and respawned. Idempotent async jobs are re-run once, then escalate to `job-failed`. |
@@ -440,7 +440,7 @@ Everything here runs in Node: `node:test` with `worker_threads` and a shared `We
 
 - ECS chunk size (the initial value is in [BUDGETS](../BUDGETS.md#simulation-constants); 32 KiB is the alternative) and change-tick granularity (per chunk vs per row): decide in M5 with real archetypes.
 - Should the runtime switch a system between serial and chunk-parallel on the fly, with hysteresis? It is safe for determinism; the concern is frame-time jitter.
-- Should job workers spin briefly before sleeping during a tick? Lower wake-up latency, but more battery drain on mobile.
+- Should job workers spin briefly before sleeping during a tick? Lower wake-up latency, but more battery drain on laptops and the Steam Deck.
 - Do we need system-level parallelism in v1 (two independent systems on different workers at once), or only chunk-level?
 - Should there be an integer `inc` command for accumulators (damage from many sources), instead of events?
 - When do the first WASM SIMD kernels pay off ([ADR-001](../DECISIONS.md#adr-001-pure-class-based-javascript))?
