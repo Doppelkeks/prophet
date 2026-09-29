@@ -70,7 +70,20 @@ jobs:
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
       - run: npx playwright install-deps chromium
-      - run: xvfb-run -a npm run test:electron
+      - name: Electron on the repo root (development, no bundling)
+        run: xvfb-run -a npm run test:electron
         env:
           CI: 'true'
           PX_GPU_SWITCHES: swiftshader
+      - run: npm run build
+      - name: Electron on dist/web (the production bundle it ships)
+        run: xvfb-run -a npm run test:electron
+        env:
+          CI: 'true'
+          PX_GPU_SWITCHES: swiftshader
+          PX_ELECTRON_ROOT: dist/web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-web
+          path: dist/web
+          retention-days: 7

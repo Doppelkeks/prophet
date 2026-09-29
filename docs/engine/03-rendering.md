@@ -420,6 +420,7 @@ The implementation is `engine/gpu/readback-ring.js`. By default it has `max(6, K
 - The engine then builds a new device on the same canvas, a new GPU swarm from the kept layout, tables and seed, and a new renderer.
 - It logs a swarm reset on the next tick, and reports `device` messages to the main thread (`window.__px.device`, plus a line in the boot panel).
 - More than 3 losses within a minute is a persistent failure.
+- `device.destroy()`, like a real loss, unmaps every buffer before `device.lost` resolves. A frame in between can therefore find a readback slot marked ready whose mapping is gone. `ReadbackRing.harvest` treats that as a lost ring, like a rejected `mapAsync`: the sim stalls until the recovery replaces the swarm, and nothing throws out of the frame.
 - In dev builds, `window.__px.loseDevice()` calls `device.destroy()`. `tests/browser/device-loss.spec.js` uses it mid-run, checks that the run continues with a respawned, rendered swarm, and replays the exported log (reset included) in Node.
 
 **Hidden or suspended.** While the tab is hidden, the window is minimized or the Steam Deck sleeps, the engine pauses and stops submitting ([08: lifecycle](08-platforms.md#lifecycle)). A loss on return is expected and recovered as above.

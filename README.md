@@ -105,6 +105,8 @@ npm run dev             # http://localhost:4173 (COOP/COEP headers, live reload)
 npm run check           # typecheck + sim lint + unit tests
 npm run test:browser    # Playwright + headless Chromium with WebGPU
 npm run electron:dev    # the desktop shell, serving the repo
+npm run build           # production bundle in dist/web (hashed, WGSL inlined, _headers)
+npm run electron        # build, then the desktop shell on dist/web
 npm run replay -- f.json  # replay an exported run in Node on the JS reference swarm
 ```
 
@@ -126,7 +128,7 @@ Working rules for contributors (and coding agents) are in [CLAUDE.md](CLAUDE.md)
 engine/     Prophet: pure JS, zero runtime dependencies
 game/       SCRAPWAKE: entry points, components, systems, shaders, UI, data
 platforms/  electron/
-tools/      dev server, sim lint, replay, generators (build and asset cooker to come)
+tools/      dev server, sim lint, production build, replay, generators (asset cooker to come)
 tests/      unit (node:test) · browser (Playwright + WebGPU) · electron
 docs/       the concept and the specs
 ```

@@ -32,7 +32,7 @@ test('Electron shell: app:// origin, cross-origin isolated, WebGPU adapter, fram
     expect(px?.engine?.adapter).toBeTruthy();
     expect(await win.evaluate(() => location.origin)).toBe('app://prophet');
     const headers = await win.evaluate(async () => {
-      const r = await fetch('/game/app/engine-worker.js');
+      const r = await fetch('/index.html'); // exists in both roots (repo and dist/web)
       return {
         coop: r.headers.get('cross-origin-opener-policy'),
         coep: r.headers.get('cross-origin-embedder-policy'),

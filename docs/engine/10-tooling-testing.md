@@ -52,6 +52,16 @@ The scheme is [ADR-025](../DECISIONS.md#adr-025-worker-build-scheme-and-tool-pin
   - esbuild does not bundle workers referenced through `new URL()`. Each pass therefore `define`s `PX_BUILD` with the hashed URLs of the workers it launches, which is why the order is fixed.
   - `define: { DEV: false }`, which strips asserts and dev tools.
   - WGSL is inlined into the engine-worker bundle as a `{ path: source }` map. Development fetches the same paths, so shader lookups are identical in both modes.
+  - The same map carries the other text files the engine loads by path; today that is only the palette CSS the renderer reads.
+- **Today** (`npm run build`, `tools/build.js`):
+  - `PX_BUILD` goes into each bundle as a banner variable, so the shader map exists once. A `define` would copy it into every use site.
+  - The build hash is a SHA-256 over `engine/`, `game/`, `index.html` and `package-lock.json`.
+  - `build.json` records that hash, the git commit, whether the tree was dirty, the file names and their sizes.
+  - `tests/browser/prod.spec.js` rebuilds `dist/web`, serves it on port 4174, and checks the following:
+    - The game boots and plays: GPU swarm, renderer and job workers.
+    - Only hashed bundles load: no `.wgsl` fetches, no `/engine/` or `/game/` paths.
+    - `DEV` is false, and there is no live reload.
+  - CI also runs the Electron smoke test on `dist/web`.
 - **Outputs:**
   - `dist/web/`, the static site ([08](08-platforms.md#web)): the three bundles plus `index.html`, `_headers` (COOP/COEP/CORP for static hosts) and `build.json` (build metadata).
   - The Electron app, which copies `dist/web/` into its resources and adds the main and preload scripts.

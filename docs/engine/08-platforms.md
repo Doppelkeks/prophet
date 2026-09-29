@@ -82,6 +82,8 @@ Nothing in this ladder changes simulation results. Anything that would (caps, *K
   - `assets/` (content-hashed)
   - `manifest.webmanifest`
   - `sw.js`
+
+  `tools/build.js` writes all of the above except the PWA files and `assets/`, which arrive with the asset cooker and the PWA work. Today it also writes a content-hashed CSS bundle and the favicon. Paths in `index.html` are relative, so the site also works from a subdirectory.
 - **Headers**, served on every response including worker scripts and assets:
   - `Cross-Origin-Opener-Policy: same-origin`
   - `Cross-Origin-Embedder-Policy: require-corp`, or `credentialless` where it helps third-party portal embeds

@@ -21,10 +21,16 @@ test('recovers from a device loss mid-run, and the replay with its swarm reset m
   expect(await page.evaluate(() => window.__px?.error ?? null)).toBeNull();
   await page.waitForFunction(() => (window.__px?.hud?.kills ?? 0) > 0 && (window.__px?.hud?.alive ?? 0) > 0, null, { timeout: 60_000 });
 
-  await page.evaluate(() => window.__px?.loseDevice());
-  await page.waitForFunction(() => window.__px?.device.recovered === 1 && window.__px?.device.state === 'ok', null, { timeout: 30_000 });
-  const device = /** @type {{ tick: number, reason: string }} */ (await page.evaluate(() => window.__px?.device));
-  expect(device.reason).toBe('destroyed');
+  // Two losses, a second apart in sim time: each is recovered and logged as its own swarm reset.
+  let device = { tick: 0, reason: '' };
+  for (const n of [1, 2]) {
+    if (n > 1) await page.waitForFunction((r) => (window.__px?.hud?.tick ?? 0) > r + 60, device.tick, { timeout: 60_000 });
+    await page.evaluate(() => window.__px?.loseDevice());
+    await page.waitForFunction((k) => window.__px?.device.recovered === k && window.__px?.device.state === 'ok', n, { timeout: 30_000 });
+    device = /** @type {{ tick: number, reason: string }} */ (await page.evaluate(() => window.__px?.device));
+    expect(device.reason).toBe('destroyed');
+    expect(await page.evaluate(() => window.__px?.status)).toBe('ok');
+  }
 
   // The run goes on: two seconds of ticks after the reset, and the director has respawned the swarm.
   await page.waitForFunction((r) => (window.__px?.hud?.tick ?? 0) > r + 120 && (window.__px?.hud?.alive ?? 0) > 0, device.tick, { timeout: 60_000 });
@@ -41,7 +47,7 @@ test('recovers from a device loss mid-run, and the replay with its swarm reset m
   const doc = /** @type {import('../../engine/app/replay.js').ReplayDocument} */ (await page.evaluate(() => window.__px?.exportReplay()));
   const resets = [];
   for (let i = 0; i < (doc.log.ui ?? []).length; i += UI_WORDS) if (doc.log.ui?.[i] === EngineCommand.SWARM_RESET) resets.push(i);
-  expect(resets.length).toBe(1);
+  expect(resets.length).toBe(2);
   const replayed = await Replay.run(SCRAPWAKE, doc);
   expect(replayed.mismatch).toBeNull();
   expect(replayed.ticks).toBe(doc.ticks);

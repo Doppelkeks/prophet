@@ -33,6 +33,13 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
     },
     {
+      // The production bundle (prod.spec.js), rebuilt for every run: dist/web behind the same headers.
+      command: `node tools/build.js && node tools/dev-server.js --port ${PORTS.prod} --root dist/web --no-watch`,
+      url: `http://127.0.0.1:${PORTS.prod}/index.html`,
+      cwd: root,
+      reuseExistingServer: false,
+    },
+    {
       command: `node tools/dev-server.js --port ${PORTS.noCoi} --no-coi --no-watch`,
       url: `http://127.0.0.1:${PORTS.noCoi}/index.html`,
       cwd: root,

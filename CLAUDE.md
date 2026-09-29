@@ -17,8 +17,8 @@ Keep code and docs in sync.
 | `npm run dev` | Dev server on http://localhost:4173 (COOP/COEP/CORP, live reload) |
 | `npm run check` | Typecheck (`tsc` checkJs) + sim lint + unit tests (`node --test`) |
 | `npm run test:browser` | Playwright + headless Chromium with WebGPU (SwiftShader) |
-| `npm run test:electron` | Electron smoke; on Linux without a display, prefix `xvfb-run -a` |
-| `npm run build` | Production bundle in `dist/web` |
+| `npm run test:electron` | Electron smoke; on Linux without a display, prefix `xvfb-run -a`; `PX_ELECTRON_ROOT=dist/web` tests the bundle |
+| `npm run build` | Production bundle in `dist/web` (`tools/build.js`; `prod.spec.js` rebuilds and tests it) |
 | `npm run electron:dev` | Electron serving the repo root |
 | `npm run replay -- f.json` | Replay an exported run (`__px.exportReplay()`) in Node on the JS reference swarm |
 

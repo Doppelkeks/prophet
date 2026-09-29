@@ -73,9 +73,20 @@ export class ReadbackRing {
    */
   harvest(fn) {
     let n = 0;
-    while (this.inFlight.length && this.inFlight[0].state === 'ready') {
+    while (!this.lost && this.inFlight.length && this.inFlight[0].state === 'ready') {
       const slot = /** @type {ReadbackSlot} */ (this.inFlight.shift());
-      fn(slot, slot.buffer.getMappedRange().slice(0));
+      /** @type {ArrayBuffer} */
+      let data;
+      try {
+        data = slot.buffer.getMappedRange().slice(0);
+      } catch (err) {
+        // A device loss unmaps every buffer, possibly after the map resolved and before device.lost
+        // does: the ring is dead, and the engine's recovery replaces it.
+        this.lost = true;
+        this.lostReason = String(err);
+        return n;
+      }
+      fn(slot, data);
       slot.buffer.unmap();
       slot.state = 'free';
       this.samples[this.sampleCount++ % this.samples.length] = performance.now() - slot.submittedAt;
