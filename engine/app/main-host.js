@@ -24,6 +24,9 @@ import { DevReload } from './dev-reload.js';
  * @property {() => Promise<Capture>} capture the internal image of the engine's last frame
  * @property {(code: number, a?: number, b?: number) => boolean} command sends a UI command (MainHost.command)
  * @property {() => Promise<Record<string, any>>} exportReplay the run so far as a replay document
+ * @property {{ state: 'ok' | 'lost', recovered: number, reason: string, tick: number }} device WebGPU device
+ *   state: device losses recovered, the last reason, and the tick of the swarm reset that followed
+ * @property {() => void} loseDevice destroys the engine's device, to test recovery (dev builds only)
  */
 
 /**
@@ -77,6 +80,8 @@ export class MainHost {
       capture: () => this.request('capture'),
       command: (code, a = 0, b = 0) => this.command(code, a, b),
       exportReplay: () => this.request('export'),
+      device: { state: 'ok', recovered: 0, reason: '', tick: 0 },
+      loseDevice: () => this.worker?.postMessage({ type: 'lose-device' }),
     };
     /** Requests waiting for the engine's answer, by id. @type {Map<number, { resolve: (v: any) => void, reject: (e: Error) => void }>} */
     this.requests = new Map();
@@ -164,6 +169,10 @@ export class MainHost {
         this.debug.frames = msg.frames;
         this.debug.gpuWaits = msg.gpuWaits ?? 0;
         this.debug.swarm = msg.swarm ?? null;
+        break;
+      case 'device': // a device loss, then its recovery (docs/engine/03-rendering.md#device-loss)
+        this.debug.device = { state: msg.state === 'restored' ? 'ok' : 'lost', recovered: msg.recovered, reason: msg.reason, tick: msg.tick ?? this.debug.device.tick };
+        if (msg.state === 'lost') console.warn(`[prophet] WebGPU device lost (${msg.reason}): ${msg.message}; recovering`);
         break;
       case 'error':
         this.fail(msg.message);
@@ -291,6 +300,8 @@ export class MainHost {
       lines.push(`adapter=${e.adapter.vendor || '?'}/${e.adapter.architecture || '?'}${e.adapter.isFallback ? ' (fallback)' : ''}`);
       lines.push(`perf=${e.perfTier} driver=${e.driver} jobs=${e.jobWorkers} frames=${d.frames}`);
     }
+    if (d.device.state === 'lost') lines.push('GPU device lost: reconnecting…');
+    else if (d.device.recovered) lines.push(`device losses recovered=${d.device.recovered} (swarm reset at tick ${d.device.tick})`);
     if (d.error) lines.push(`error: ${d.error}`);
     this.bootPanel.textContent = lines.join('\n');
   }

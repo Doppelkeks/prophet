@@ -4,6 +4,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Replay } from '../../engine/app/replay.js';
 import { SimBoot } from '../../engine/app/sim-boot.js';
+import { EngineCommand } from '../../engine/app/sim-core.js';
+import { SwarmTables } from '../../engine/swarm/swarm-contract.js';
 import { Heap } from '../../engine/core/heap.js';
 import { UI_WORDS } from '../../engine/input/command-log.js';
 import { InputRecord } from '../../engine/input/input-record.js';
@@ -71,5 +73,54 @@ test('a run with UI commands exports as a replay document and replays to the sam
   assert.ok(diverged.mismatch.tick > 200, `first mismatch at ${diverged.mismatch.tick}`);
 
   await assert.rejects(Replay.run(SCRAPWAKE, { ...doc, build: doc.build ^ 1 }), /recorded by build/);
+  await boot.jobs.shutdown();
+});
+
+test('a device loss becomes a logged swarm reset: the stalled tick resumes on a fresh swarm, and the replay matches', { timeout: 120000 }, async () => {
+  const LOST = 290; // blocks from this tick on never arrive, as if the device died here
+  const boot = await SimBoot.create({
+    game: SCRAPWAKE,
+    heap: Heap.create('test', false),
+    tier: 'inline',
+    hashEvery: 60,
+    swarm: (layout, tables, seed) => new SwarmReference(layout, tables, { seed, delay: (t) => (t >= LOST ? 1e9 : 0) }),
+    swarmProfile: 'test',
+  });
+  const sim = boot.sim;
+  const link = /** @type {import('../../engine/app/sim-core.js').SwarmLink} */ (sim.swarm);
+  const K = link.K;
+  const [still] = InputRecord.pack(0, 0, 0, 0, 0, 0);
+  let t = 0;
+  for (; t < 600; t++) {
+    sim.stamp(still, 0);
+    if (!(await sim.step())) break;
+  }
+  assert.equal(sim.tick, LOST + K, 'the first tick that needs a lost block stalls');
+  assert.ok(sim.log.has(sim.tick), 'and it is already stamped');
+
+  // Recovery: a fresh swarm (new buffers) and a reset logged on the stalled tick.
+  const layout = link.backend.layout;
+  link.backend = new SwarmReference(layout, SwarmTables.build(layout, SCRAPWAKE.swarm?.types ?? []), { seed: SCRAPWAKE.swarm?.seed ?? 0 });
+  sim.requestSwarmReset();
+  assert.equal(sim.log.uiCount(sim.tick), 1);
+  assert.equal(sim.log.uiWords[sim.log.uiAt(sim.tick)], EngineCommand.SWARM_RESET);
+  while (sim.tick < 600) {
+    sim.stamp(still, 0);
+    assert.equal(await sim.step(), true, `tick ${sim.tick} runs`);
+  }
+  assert.equal(sim.resets, 1);
+  assert.ok(sim.world.get(sim.resources.run, RunStats.alive) > 0, 'the director respawned the swarm');
+
+  const header = {
+    build: boot.manifest.hash,
+    heapProfile: /** @type {const} */ ('test'),
+    seed: SCRAPWAKE.swarm?.seed ?? 0,
+    K,
+    swarmCaps: { ...layout.caps },
+    hashEvery: 60,
+  };
+  const r = await Replay.run(SCRAPWAKE, JSON.parse(JSON.stringify(Replay.document(sim, header))));
+  assert.equal(r.mismatch, null, 'one reference swarm, reset in place, matches the fresh one');
+  assert.equal(r.ticks, 600);
   await boot.jobs.shutdown();
 });

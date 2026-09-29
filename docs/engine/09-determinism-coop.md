@@ -268,7 +268,7 @@ The sim consumes only **commands**, each stamped with the tick it applies to. Ev
 | Cancel, sell, repair, upgrade | Tile x, tile y; for upgrades, the branch | UI |
 | Equip or salvage a part | Offer index, slot | UI (assembly screen) |
 | Pause, resume | — (single-player only; while paused, no ticks run) | UI |
-| Swarm reset | First discarded tick | Engine, after device loss ([05](05-gpu-swarm.md#resets-and-device-loss)) |
+| Swarm reset | None: the blocks of the *K* ticks before it are discarded. It is logged as the engine command `SWARM_RESET` (UI record codes with bit 31 set are the engine's). | Engine, after device loss ([05](05-gpu-swarm.md#resets-and-device-loss)) |
 
 - Commands refer only to sim-stable identifiers: tile coordinates, offer indices, and entity handles (which are deterministic). Never DOM state or screen positions.
 - Settings that don't affect the sim (volume, UI scale, graphics) never enter the log. The game-speed accessibility option changes how many ticks run per second, not what a tick does, so it doesn't enter the log either.

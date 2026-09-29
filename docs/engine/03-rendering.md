@@ -415,6 +415,13 @@ The implementation is `engine/gpu/readback-ring.js`. By default it has `max(6, K
 8. **Swarm:** fodder, projectiles and particles are gone, and the director respawns fodder at the spawn edges ([ADR-019](../DECISIONS.md#adr-019-fodder-is-not-saved)). Uncollected pickups are not lost: their total value is known exactly from the counters, and it is respawned as merged gems near PATCH ([05: resets and device loss](05-gpu-swarm.md#resets-and-device-loss)).
 9. **Resume** once the visible chunks are meshed.
 
+**Today** (`EngineHost.recover`):
+- The frame loop freezes, and a running frame is allowed to finish.
+- The engine then builds a new device on the same canvas, a new GPU swarm from the kept layout, tables and seed, and a new renderer.
+- It logs a swarm reset on the next tick, and reports `device` messages to the main thread (`window.__px.device`, plus a line in the boot panel).
+- More than 3 losses within a minute is a persistent failure.
+- In dev builds, `window.__px.loseDevice()` calls `device.destroy()`. `tests/browser/device-loss.spec.js` uses it mid-run, checks that the run continues with a respawned, rendered swarm, and replays the exported log (reset included) in Node.
+
 **Hidden or suspended.** While the tab is hidden, the window is minimized or the Steam Deck sleeps, the engine pauses and stops submitting ([08: lifecycle](08-platforms.md#lifecycle)). A loss on return is expected and recovered as above.
 
 Repeated losses in a short window drop one performance tier. A persistent failure shows an error screen with a report.

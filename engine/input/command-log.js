@@ -55,6 +55,27 @@ export class CommandLog {
     this.length = tick + 1;
   }
 
+  /**
+   * Adds UI commands to the last recorded tick, which has not run yet (an engine command that must land
+   * on a tick already stamped, such as a swarm reset while that tick is stalled).
+   * @param {number} tick must be the last recorded tick @param {Uint32Array} ui @param {number} uiCount
+   */
+  amend(tick, ui, uiCount) {
+    if (tick !== this.length - 1) throw new Error(`command log: only the last tick (${this.length - 1}) can be amended, not ${tick}`);
+    const had = this.uiCount(tick);
+    if (had + uiCount > UI_MAX) throw new Error(`command log: ${had + uiCount} UI commands on one tick (at most ${UI_MAX})`);
+    const n = uiCount * UI_WORDS;
+    if (this.uiLength + n > this.uiWords.length) {
+      const grown = new Uint32Array(Math.max(this.uiWords.length * 2, this.uiLength + n));
+      grown.set(this.uiWords);
+      this.uiWords = grown;
+    }
+    for (let i = 0; i < n; i++) this.uiWords[this.uiLength + i] = ui[i];
+    this.uiLength += n;
+    const w1 = this.words[2 * tick + 1];
+    this.words[2 * tick + 1] = ((w1 & 0xffffff) | ((had + uiCount) << 24)) >>> 0;
+  }
+
   /** Whether a tick has a record. @param {number} tick */
   has(tick) {
     return tick >= 0 && tick < this.length;

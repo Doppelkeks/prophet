@@ -2,8 +2,18 @@
 // The headless simulation core: the fixed-step tick loop around the ECS scheduler, fed only by the
 // command log (docs/engine/09-determinism-coop.md#input-as-commands). No DOM, GPU or clock, so the same
 // code runs in the engine worker and in Node (replays, tests). Integer-only (sim lint).
-import { CommandLog } from '../input/command-log.js';
+import { CommandLog, UI_MAX, UI_WORDS } from '../input/command-log.js';
 import { SwarmInbound, SwarmOutbound } from '../swarm/swarm-contract.js';
+import { OH, OUT_MAGIC } from '../swarm/swarm-layout.js';
+
+/**
+ * Engine commands share the UI command records of the log, with codes games never use (bit 31 set):
+ * replays reproduce them on their tick (docs/engine/09-determinism-coop.md#input-as-commands).
+ */
+export const EngineCommand = Object.freeze({
+  /** Empties the swarm on this tick and discards the blocks of the K ticks before it (device loss). */
+  SWARM_RESET: 0x80000001,
+});
 
 /**
  * @typedef {object} SimResources engine-thread services systems may use (serial systems only)
@@ -50,6 +60,14 @@ export class SimCore {
     this.resources.tick = 0;
     this.resources.swarm = this.swarm ? new SwarmInbound(this.swarm.backend.layout) : null;
     this.resources.swarmOut = null;
+    /** Swarm blocks of ticks in [emptyFrom, emptyUntil) were discarded by a swarm reset. */
+    this.emptyFrom = 0;
+    this.emptyUntil = 0;
+    /** Swarm resets applied. */
+    this.resets = 0;
+    this.pendingReset = false;
+    this.engineCmd = new Uint32Array(UI_WORDS);
+    this.empty = new Int32Array(this.swarm ? this.swarm.backend.layout.L.outWords : 0);
   }
 
   /**
@@ -62,8 +80,38 @@ export class SimCore {
    */
   stamp(w0, w1, ui = null, uiCount = 0) {
     if (this.log.has(this.tick)) return false;
-    this.log.set(this.tick, w0, w1, ui, uiCount);
+    if (this.pendingReset) {
+      this.log.set(this.tick, w0, w1, ui, uiCount < UI_MAX ? uiCount : UI_MAX - 1); // the reset takes the last slot
+      this.log.amend(this.tick, this.engineCmd, 1);
+      this.pendingReset = false;
+    } else {
+      this.log.set(this.tick, w0, w1, ui, uiCount);
+    }
     return true;
+  }
+
+  /**
+   * Logs a swarm reset for the next tick to run (docs/engine/05-gpu-swarm.md#resets-and-device-loss): the
+   * engine calls it after a device loss, once the new swarm exists. If that tick is already stamped (it
+   * stalled on a block the lost device never delivered), its record is amended, since it has not run.
+   */
+  requestSwarmReset() {
+    if (!this.swarm) return;
+    const cmd = this.engineCmd;
+    cmd[0] = EngineCommand.SWARM_RESET;
+    cmd[1] = 0;
+    cmd[2] = 0;
+    if (this.log.has(this.tick)) this.log.amend(this.tick, cmd, 1);
+    else this.pendingReset = true;
+  }
+
+  /** A block with no events for tick `b` (a block a swarm reset discarded). @param {number} b */
+  #emptyBlock(b) {
+    const e = this.empty;
+    e.fill(0);
+    e[OH.MAGIC] = OUT_MAGIC;
+    e[OH.TICK] = b;
+    return e;
   }
 
   /** Whether the next tick has its input (a replay ends when it doesn't). */
@@ -82,19 +130,39 @@ export class SimCore {
     const res = this.resources;
     const swarm = this.swarm;
     if (swarm) {
+      // A swarm reset on this tick discards the blocks of ticks t − K .. t − 1: the ticks from here to
+      // t + K − 1 see empty blocks instead, whether or not those blocks arrived.
+      const log = this.log;
+      const at = log.uiAt(t);
+      let reset = false;
+      for (let i = log.uiCount(t) - 1; i >= 0; i--) if (log.uiWords[at + Math.imul(i, UI_WORDS)] === EngineCommand.SWARM_RESET) reset = true;
+      if (reset) {
+        this.emptyFrom = t - swarm.K;
+        this.emptyUntil = t;
+        this.resets++;
+      }
       if (t >= swarm.K) {
-        const block = swarm.backend.take(t - swarm.K);
-        if (!block) {
-          this.stalls++;
-          return false;
+        const b = t - swarm.K;
+        let block = null;
+        if (b >= this.emptyFrom && b < this.emptyUntil) {
+          swarm.backend.take(b); // dropped if it did arrive (a replay's reference swarm delivers everything)
+          block = this.#emptyBlock(b);
+        } else {
+          block = swarm.backend.take(b);
+          if (!block) {
+            this.stalls++;
+            return false;
+          }
         }
         const out = new SwarmOutbound(swarm.backend.layout, block);
-        if (out.tick !== t - swarm.K) throw new Error(`sim: swarm block of tick ${out.tick} arrived for tick ${t - swarm.K}`);
+        if (out.tick !== b) throw new Error(`sim: swarm block of tick ${out.tick} arrived for tick ${b}`);
         res.swarmOut = out;
       } else {
         res.swarmOut = null;
       }
-      /** @type {SwarmInbound} */ (res.swarm).reset();
+      const inbound = /** @type {SwarmInbound} */ (res.swarm);
+      inbound.reset();
+      if (reset) inbound.requestReset();
     }
     const input = res.input;
     input.w0 = this.log.w0(t);

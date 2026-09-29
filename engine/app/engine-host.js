@@ -54,6 +54,8 @@ const HUD_EVERY = 2; // frames: the HUD refreshes at 30 Hz at 60 fps
 const MAX_FRAMES_IN_FLIGHT = 2;
 /** State-hash interval of debug builds, in ticks (docs/BUDGETS.md#simulation-constants). */
 const HASH_EVERY = 60;
+/** More device losses than this within a minute is a persistent failure (docs/engine/03-rendering.md#device-loss). */
+const MAX_LOSSES_PER_MINUTE = 3;
 
 export class EngineHost {
   /**
@@ -96,6 +98,15 @@ export class EngineHost {
     this.stats = { fps: 0, frameMs: 0, simMs: 0, ticks: 0, skipped: 0, readbackP95: 0, gpuWaits: 0 };
     /** Frames submitted to the GPU and not finished yet. */
     this.inFlight = 0;
+    /** Bumped for every new device, so events of a lost one are ignored. */
+    this.deviceGen = 0;
+    this.recovering = false;
+    /** Device losses recovered, and the times of the recent ones (performance.now()). */
+    this.recovered = 0;
+    /** @type {number[]} */
+    this.lossTimes = [];
+    /** @type {{ layout: import('../swarm/swarm-layout.js').SwarmLayout, tables: Int32Array, seed: number } | null} */
+    this.swarmArgs = null;
     scope.onmessage = (e) => this.onMessage(e.data);
   }
 
@@ -123,6 +134,66 @@ export class EngineHost {
       case 'export':
         this.exportReplay(msg.id);
         break;
+      case 'lose-device': // tests: a device loss on demand (dev builds only)
+        if (DEV) this.gpu?.device.destroy();
+        break;
+    }
+  }
+
+  /** Recovers from device losses and reports validation errors, for the current device only. @param {GpuDevice} gpu */
+  #watch(gpu) {
+    const gen = ++this.deviceGen;
+    gpu.lost.then((info) => {
+      if (gen === this.deviceGen) this.recover(info);
+    });
+    gpu.device.addEventListener('uncapturederror', (e) => {
+      if (gen === this.deviceGen) this.fail(new Error(`WebGPU validation: ${/** @type {GPUUncapturedErrorEvent} */ (e).error.message}`));
+    });
+  }
+
+  /**
+   * Device-loss recovery (docs/engine/03-rendering.md#device-loss): the sim freezes, a new device, swarm and
+   * renderer are built, and a swarm reset is logged on the next tick, so replays reproduce the loss.
+   * @param {GPUDeviceLostInfo} info
+   */
+  async recover(info) {
+    const now = performance.now();
+    this.lossTimes = this.lossTimes.filter((t) => now - t < 60_000);
+    this.lossTimes.push(now);
+    if (this.lossTimes.length > MAX_LOSSES_PER_MINUTE) {
+      this.fail(new Error(`webgpu-device-lost (${info.reason}): ${info.message} (${this.lossTimes.length} losses in a minute)`));
+      return;
+    }
+    this.recovering = true;
+    this.scope.postMessage({ type: 'device', state: 'lost', reason: info.reason, message: info.message, recovered: this.recovered });
+    try {
+      while (this.busy) await new Promise((r) => setTimeout(r, 1)); // let a running frame finish
+      const gpu = await GpuDevice.create({ canvas: this.canvas });
+      this.gpu = gpu;
+      this.#watch(gpu);
+      this.inFlight = 0; // the lost device's frames never complete
+      const sim = this.sim;
+      if (this.swarmArgs && sim?.swarm) {
+        const { layout, tables, seed } = this.swarmArgs;
+        this.swarm?.destroy();
+        const swarm = await Swarm.create(gpu.device, layout, tables, seed, { K: this.game.swarm?.K });
+        this.swarm = swarm;
+        sim.swarm.backend = swarm;
+        sim.requestSwarmReset();
+      }
+      if (this.game.render && this.canvas) {
+        this.renderer?.destroy();
+        const r = await Renderer.create(gpu.device, gpu.format, this.game.render.style);
+        r.resize(this.canvas.width, this.canvas.height);
+        if (this.swarm) r.bindSwarm(this.swarm.layout, this.swarm.buffers.U, this.swarm.buffers.P);
+        this.renderer = r;
+      }
+      this.recovered++;
+      this.scope.postMessage({ type: 'device', state: 'restored', reason: info.reason, message: info.message, recovered: this.recovered, tick: sim?.tick ?? 0 });
+    } catch (err) {
+      this.fail(err);
+    } finally {
+      this.recovering = false;
     }
   }
 
@@ -166,10 +237,7 @@ export class EngineHost {
     msg.canvas.width = Math.max(1, msg.width);
     msg.canvas.height = Math.max(1, msg.height);
     this.gpu = await GpuDevice.create({ canvas: msg.canvas });
-    this.gpu.lost.then((info) => this.fail(new Error(`webgpu-device-lost (${info.reason}): ${info.message}`)));
-    this.gpu.device.addEventListener('uncapturederror', (e) => {
-      this.fail(new Error(`WebGPU validation: ${/** @type {GPUUncapturedErrorEvent} */ (e).error.message}`));
-    });
+    this.#watch(this.gpu);
     const cores = this.scope.navigator.hardwareConcurrency || 1;
     const perf = Tiers.performance(this.gpu.info, cores, msg.perf ?? null);
     const threading = msg.threading;
@@ -189,7 +257,10 @@ export class EngineHost {
       workers,
       spawn: (i) => WorkerPorts.spawnBrowser(this.jobWorkerUrl, `px-job-${i}`),
       swarm: gpuSwarm
-        ? async (layout, tables, seed) => (this.swarm = await Swarm.create(device, layout, tables, seed, { K: this.game.swarm?.K }))
+        ? async (layout, tables, seed) => {
+            this.swarmArgs = { layout, tables, seed }; // kept to rebuild the swarm after a device loss
+            return (this.swarm = await Swarm.create(device, layout, tables, seed, { K: this.game.swarm?.K }));
+          }
         : (layout, tables, seed) => new SwarmReference(layout, tables, { seed }),
       swarmProfile: gpuSwarm ? perf : 'test',
       swarmCaps: caps,
@@ -254,6 +325,7 @@ export class EngineHost {
     }
     const sim = this.sim;
     if (!sim || !this.ring) return;
+    if (this.recovering) return; // no device: the sim stays frozen until it is back
     if (this.inFlight >= MAX_FRAMES_IN_FLIGHT) {
       this.stats.gpuWaits++; // the GPU is behind: no sim, no GPU work this frame
       return;
@@ -290,10 +362,11 @@ export class EngineHost {
       s.readbackP95 = swarm ? swarm.readback.p95() : 0;
       this.render();
       this.inFlight++;
-      /** @type {GpuDevice} */ (this.gpu).device.queue.onSubmittedWorkDone().then(
-        () => this.inFlight--,
-        () => this.inFlight--,
-      );
+      const gen = this.deviceGen;
+      const done = () => {
+        if (gen === this.deviceGen) this.inFlight--;
+      };
+      /** @type {GpuDevice} */ (this.gpu).device.queue.onSubmittedWorkDone().then(done, done);
       this.frames++;
       if (this.frames % HUD_EVERY === 0) this.writeHud();
       if (this.frames % 30 === 1) {

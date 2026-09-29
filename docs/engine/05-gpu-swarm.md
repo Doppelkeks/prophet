@@ -416,7 +416,10 @@ Tuning (durations per tier, damage per step, multipliers) lives in game data ([c
 
 - On [device loss](03-rendering.md#device-loss), the renderer rebuilds the device, pipelines and buffers. Static swarm data (tables, sine table, fields, collision grids) is uploaded again from the CPU copies.
 - Swarm state is gone: fodder, projectiles and the pickups lying on the ground. So are the outbound blocks of the ticks still in flight.
-- The engine turns this into a **swarm reset** command at tick *R*, carried in that tick's inbound header and recorded in the command log. The command names the first discarded tick. All pools are cleared at *R*, blocks from the discarded ticks count as empty, and the director respawns fodder at the district's spawn edges ([ADR-019](../DECISIONS.md#adr-019-fodder-is-not-saved)).
+- The engine turns this into a **swarm reset** command at tick *R*, carried in that tick's inbound header and recorded in the command log. The director then respawns fodder at the district's spawn edges ([ADR-019](../DECISIONS.md#adr-019-fodder-is-not-saved)).
+  - **Discarded blocks.** The blocks of ticks *R − K* … *R − 1*, which no tick has consumed yet, count as empty for ticks *R* … *R + K − 1*, whether or not they arrived. The rule is implicit in *R*, so the command needs no argument.
+  - **Logging.** `SimCore.requestSwarmReset()` logs the command as the engine command `SWARM_RESET` on the next tick to run. If that tick is already stamped, because it stalled on a block the lost device never delivered, its record is amended; it has not run yet.
+  - **Clearing.** At *R*, U, P and A are zeroed whole: with `clearBuffer` on the GPU, and in `ClearPass` in the reference. A reset swarm therefore equals a freshly created one, and a replay that resets its one reference swarm in place matches a live run that switched to new buffers.
 - Scrap on the ground is known exactly: scrap dropped minus scrap collected, both counters. After a reset, the economy re-spawns the outstanding value near PATCH as merged gems, so no scrap is lost.
 - Because the reset is a logged command, a replay reproduces it on the same tick, and co-op peers apply it together ([09](09-determinism-coop.md#co-op-model)). Resuming from a checkpoint uses the same path.
 

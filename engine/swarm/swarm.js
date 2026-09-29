@@ -226,6 +226,12 @@ export class Swarm {
     const pl = this.pipelines;
     const wg = this.wg;
     const groups = (/** @type {number} */ n) => Math.ceil(n / wg);
+    if (p.flags & 1 && count > 0) {
+      // Swarm reset: the pools and the scratch start over, exactly like fresh buffers (ClearPass twin).
+      encoder.clearBuffer(this.buffers.U);
+      encoder.clearBuffer(this.buffers.P);
+      encoder.clearBuffer(this.buffers.A);
+    }
     const pass = encoder.beginComputePass({ label: `swarm.tick${p.tick}` });
     pass.setBindGroup(0, this.bindGroup, [k * PARAMS_STRIDE]);
     const run = (/** @type {string} */ name, /** @type {number} */ x) => {
@@ -240,7 +246,7 @@ export class Swarm {
     };
     /** @type {Record<string, () => void>} */
     const steps = {
-      clear: () => run('clear', groups(Math.max(L.cells, L.outWords, L.unitCap, L.shotCap, L.fireCap))),
+      clear: () => run('clear', groups(Math.max(L.cells, L.outWords))),
       freeScan: () => {
         scan(0, L.unitCap);
         scan(1, L.shotCap);
