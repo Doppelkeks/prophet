@@ -1,6 +1,6 @@
-// The readback ring on a fake device: in-order harvest, and a device loss that unmaps a slot after its
-// map resolved (device.destroy() unmaps every buffer before device.lost resolves) marks the ring lost
-// instead of throwing out of the frame.
+// The readback ring on a fake device: in-order harvest of the mapped range itself (no copy), and a device
+// loss that unmaps a slot after its map resolved (device.destroy() unmaps every buffer before device.lost
+// resolves) marks the ring lost instead of throwing out of the frame.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ReadbackRing } from '../../engine/gpu/readback-ring.js';
@@ -65,4 +65,36 @@ test('harvests in submission order, and a slot unmapped by a device loss marks t
   assert.equal(ring.lost, true);
   assert.match(ring.lostReason, /getMappedRange failed/);
   assert.deepEqual(got, [1, 2]);
+});
+
+test('harvest hands out the mapped range itself, then unmaps and frees the slot; slots reuse their tick lists', async () => {
+  const ring = new ReadbackRing(device, { slots: 2, bytes: 16 });
+  const a = /** @type {import('../../engine/gpu/readback-ring.js').ReadbackSlot} */ (ring.acquire());
+  const list = a.ticks;
+  a.ticks.push(7, 8);
+  ring.submitted(a, a.ticks);
+  const fake = /** @type {FakeBuffer} */ (/** @type {unknown} */ (a.buffer));
+  fake.resolveMap?.();
+  await flush();
+  /** @type {ArrayBuffer | null} */
+  let seen = null;
+  let mappedInside = false;
+  assert.equal(
+    ring.harvest((slot, data) => {
+      seen = data;
+      mappedInside = fake.mapped;
+      assert.deepEqual(slot.ticks, [7, 8]);
+    }),
+    1,
+  );
+  assert.equal(seen, fake.data, 'the mapped range, not a copy');
+  assert.equal(mappedInside, true);
+  assert.equal(fake.mapped, false, 'unmapped after the callback');
+  assert.equal(a.state, 'free');
+  const again = /** @type {import('../../engine/gpu/readback-ring.js').ReadbackSlot} */ (ring.acquire());
+  assert.equal(again, a);
+  assert.equal(again.ticks, list, 'the same list, cleared');
+  assert.equal(again.ticks.length, 0);
+  ring.release(again);
+  assert.ok(ring.p99() >= ring.p95());
 });

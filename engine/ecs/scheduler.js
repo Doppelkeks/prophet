@@ -8,6 +8,8 @@
 // Systems run one at a time in serial order. A system with a query runs chunk-parallel on the job
 // system when allowed (`shared` tier), otherwise serially; both produce identical command segments.
 // Between stages (sync points) the command buffers are applied.
+// A tick is synchronous until a system has to wait for job workers: `tick`, `runStage` and `extract` return
+// null when everything ran on this thread (nothing allocated), and a promise for the rest otherwise.
 import { CommandApplier } from './command-buffer.js';
 import { SystemChunkKernel } from './ecs-env.js';
 
@@ -59,20 +61,59 @@ export class Scheduler {
     this.stats = { serialChunks: 0, parallelChunks: 0, segments: 0 };
   }
 
-  /** Runs the per-tick stages with a sync point after each. */
-  async tick() {
-    for (const stage of TICK_STAGES) await this.runStage(stage);
+  /**
+   * Runs the per-tick stages with a sync point after each.
+   * @returns {Promise<void> | null} null when the whole tick ran on this thread
+   */
+  tick() {
+    for (let s = 0; s < TICK_STAGES.length; s++) {
+      const wait = this.runStage(TICK_STAGES[s]);
+      if (wait) return this.#tickFrom(wait, s + 1);
+    }
+    this.ticks++;
+    return null;
+  }
+
+  /** The rest of a tick once a stage waits for job workers. @param {Promise<void>} wait @param {number} s next stage */
+  async #tickFrom(wait, s) {
+    await wait;
+    for (; s < TICK_STAGES.length; s++) {
+      const w = this.runStage(TICK_STAGES[s]);
+      if (w) await w;
+    }
     this.ticks++;
   }
 
-  /** Runs the Extract stage (once per rendered frame). */
-  async extract() {
-    await this.runStage('Extract');
+  /**
+   * Runs the Extract stage (once per rendered frame).
+   * @returns {Promise<void> | null}
+   */
+  extract() {
+    return this.runStage('Extract');
   }
 
-  /** @param {Stage} stage */
-  async runStage(stage) {
-    for (const id of this.plan.order[stage]) await this.#runSystem(id);
+  /**
+   * Runs one stage's systems in serial order, then applies the command buffers.
+   * @param {Stage} stage
+   * @returns {Promise<void> | null} null when every system ran on this thread
+   */
+  runStage(stage) {
+    const order = this.plan.order[stage];
+    for (let i = 0; i < order.length; i++) {
+      const wait = this.#runSystem(order[i]);
+      if (wait) return this.#stageFrom(wait, order, i + 1);
+    }
+    this.stats.segments += this.applier.apply();
+    return null;
+  }
+
+  /** The rest of a stage once a system waits for job workers. @param {Promise<void>} wait @param {number[]} order @param {number} i next system */
+  async #stageFrom(wait, order, i) {
+    await wait;
+    for (; i < order.length; i++) {
+      const w = this.#runSystem(order[i]);
+      if (w) await w;
+    }
     this.stats.segments += this.applier.apply();
   }
 
@@ -83,8 +124,8 @@ export class Scheduler {
     return S.parallel === 'chunks' || this.mode === 'always';
   }
 
-  /** @param {number} id */
-  async #runSystem(id) {
+  /** @param {number} id @returns {Promise<void> | null} a promise when the system runs on job workers */
+  #runSystem(id) {
     const S = this.manifest.systems[id];
     const world = this.world;
     const clock = world.bumpClock();
@@ -102,14 +143,21 @@ export class Scheduler {
     } else {
       const n = query.collect(this.lastRun[id], world.heap.i32, world.listW, world.listCap);
       world.stampChunks(world.listW, n, this.writeFields[id], clock);
-      if (n > 0 && this.jobs && this.#parallel(S)) {
-        await this.jobs.wait(this.jobs.parallelFor(SystemChunkKernel, [id, world.listW << 2], 0, n, this.grain));
-        this.stats.parallelChunks += n;
-      } else if (n > 0) {
+      if (n > 0 && this.jobs && this.#parallel(S)) return this.#runParallel(id, n, clock);
+      if (n > 0) {
         this.env.runChunks(id, world.listW, 0, n);
         this.stats.serialChunks += n;
       }
     }
+    this.lastRun[id] = clock;
+    return null;
+  }
+
+  /** Runs a system's `n` collected chunks on the job workers. @param {number} id @param {number} n @param {number} clock */
+  async #runParallel(id, n, clock) {
+    const jobs = /** @type {import('../jobs/job-system.js').JobSystem} */ (this.jobs);
+    await jobs.wait(jobs.parallelFor(SystemChunkKernel, [id, this.world.listW << 2], 0, n, this.grain));
+    this.stats.parallelChunks += n;
     this.lastRun[id] = clock;
   }
 

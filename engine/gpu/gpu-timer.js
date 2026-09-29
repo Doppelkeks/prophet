@@ -40,13 +40,15 @@ export class GpuTimer {
   }
 
   /**
-   * Duration of pair `i` in ns, from resolved pairs; 0 when the timestamps are unusable (a reset or
-   * quantized clock can make end ≤ begin).
-   * @param {BigInt64Array} pairs @param {number} i
+   * Duration of pair `i` in ns, read from resolved pairs as 32-bit words starting at word `at` (u64
+   * little-endian: begin lo, begin hi, end lo, end hi). No BigInt, so nothing is allocated. Returns 0 when
+   * the timestamps are unusable (a reset or quantized clock can make end ≤ begin).
+   * @param {Int32Array} words @param {number} at @param {number} i
    */
-  static ns(pairs, i) {
-    const d = pairs[2 * i + 1] - pairs[2 * i];
-    return d > 0n ? Number(d) : 0;
+  static ns(words, at, i) {
+    const b = at + 4 * i;
+    const d = ((words[b + 3] >>> 0) - (words[b + 1] >>> 0)) * 4294967296 + ((words[b + 2] >>> 0) - (words[b] >>> 0));
+    return d > 0 ? d : 0;
   }
 
   destroy() {
@@ -55,11 +57,12 @@ export class GpuTimer {
   }
 }
 
-/** A ring of recent samples with percentiles (ms). Not for hot paths: `percentile` sorts a copy. */
+/** A ring of recent samples with percentiles (ms). `percentile` sorts a preallocated copy: no allocation. */
 export class Samples {
   /** @param {number} [size] */
   constructor(size = 256) {
     this.values = new Float64Array(size);
+    this.sorted = new Float64Array(size);
     this.count = 0;
   }
 
@@ -72,7 +75,10 @@ export class Samples {
   percentile(q) {
     const n = Math.min(this.count, this.values.length);
     if (!n) return 0;
-    const sorted = this.values.slice(0, n).sort();
+    const sorted = this.sorted;
+    sorted.set(this.values);
+    if (n < sorted.length) sorted.fill(Infinity, n); // unused entries sort last
+    sorted.sort();
     return sorted[Math.min(n - 1, Math.floor(n * q))];
   }
 

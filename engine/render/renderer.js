@@ -111,6 +111,15 @@ export class Renderer {
     this.frameF = new Float32Array(this.frameWords);
     this.frameU = new Uint32Array(this.frameWords);
     this.upWords = new Float32Array(8);
+    /** The upscale offset of this frame (reused). */
+    this.upOffset = [0, 0];
+    // Pass descriptors are built once (the scene pass on resize); only the canvas view changes per frame.
+    /** @type {GPURenderPassDescriptor | null} */
+    this.scenePass = null;
+    /** @type {GPURenderPassColorAttachment} */
+    this.canvasAttachment = { view: /** @type {GPUTextureView} */ (/** @type {unknown} */ (null)), loadOp: 'clear', storeOp: 'store', clearValue: this.clear };
+    /** @type {GPURenderPassDescriptor} */
+    this.upscalePass = { label: 'render.upscale', colorAttachments: [this.canvasAttachment] };
 
     const V = GPUShaderStage.VERTEX;
     const Fr = GPUShaderStage.FRAGMENT;
@@ -276,12 +285,18 @@ export class Renderer {
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
     });
     this.depth = this.device.createTexture({ label: 'render.depth', size, format: DEPTH_FORMAT, usage: GPUTextureUsage.RENDER_ATTACHMENT });
+    const colorView = this.color.createView();
+    this.scenePass = {
+      label: 'render.scene',
+      colorAttachments: [{ view: colorView, loadOp: 'clear', storeOp: 'store', clearValue: this.clear }],
+      depthStencilAttachment: { view: this.depth.createView(), depthLoadOp: 'clear', depthStoreOp: 'discard', depthClearValue: 1 },
+    };
     this.upGroup = this.device.createBindGroup({
       label: 'render.upscale',
       layout: this.upLayout,
       entries: [
         { binding: 0, resource: { buffer: this.upBuffer } },
-        { binding: 1, resource: this.color.createView() },
+        { binding: 1, resource: colorView },
       ],
     });
   }
@@ -295,9 +310,8 @@ export class Renderer {
    * @param {number} actorCount records in `this.actors`
    */
   encode(encoder, target, camera, alpha, actorCount) {
-    const color = this.color;
-    const depth = this.depth;
-    if (!color || !depth || !this.sceneGroup || !this.upGroup || !this.pipelines.ground) return;
+    const scenePass = this.scenePass;
+    if (!scenePass || !this.sceneGroup || !this.upGroup || !this.pipelines.ground) return;
     const vp = this.viewport;
     const q = this.device.queue;
     const iw = vp.internalW;
@@ -340,12 +354,12 @@ export class Renderer {
     u[29] = this.stunColor;
     q.writeBuffer(this.frameBuffer, 0, this.frameWords);
     if (actors) q.writeBuffer(this.actorBuffer, 0, this.actors, 0, actors * ACTOR_WORDS);
-    const [ox, oy] = camera.offset(vp.k);
+    const off = camera.offset(vp.k, this.upOffset);
     const up = this.upWords;
     up[0] = vp.cropX;
     up[1] = vp.cropY;
-    up[2] = ox;
-    up[3] = oy;
+    up[2] = off[0];
+    up[3] = off[1];
     up[4] = vp.k;
     up[5] = PixelViewport.BORDER;
     up[6] = iw;
@@ -363,11 +377,7 @@ export class Renderer {
     v.cropY = vp.cropY;
 
     const P = this.pipelines;
-    const scene = encoder.beginRenderPass({
-      label: 'render.scene',
-      colorAttachments: [{ view: color.createView(), loadOp: 'clear', storeOp: 'store', clearValue: this.clear }],
-      depthStencilAttachment: { view: depth.createView(), depthLoadOp: 'clear', depthStoreOp: 'discard', depthClearValue: 1 },
-    });
+    const scene = encoder.beginRenderPass(scenePass);
     scene.setBindGroup(0, this.sceneGroup);
     scene.setPipeline(P.ground);
     scene.draw(3);
@@ -388,10 +398,8 @@ export class Renderer {
       scene.draw(12, actors);
     }
     scene.end();
-    const out = encoder.beginRenderPass({
-      label: 'render.upscale',
-      colorAttachments: [{ view: target, loadOp: 'clear', storeOp: 'store', clearValue: this.clear }],
-    });
+    this.canvasAttachment.view = target;
+    const out = encoder.beginRenderPass(this.upscalePass);
     out.setPipeline(P.upscale);
     out.setBindGroup(0, this.upGroup);
     out.draw(3);

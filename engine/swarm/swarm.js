@@ -4,8 +4,12 @@
 // inbound block and parameter slot, followed by a copy of its outbound block into the frame's readback
 // slot. Blocks come back through the readback ring, strictly in submission order. With `timestamp-query`,
 // each tick's pass (or, in `pass` timing, each step's) is timed, and the timings ride in the same slot.
-import { GpuTimer, PAIR_BYTES, Samples } from '../gpu/gpu-timer.js';
+// A frame allocates only what WebGPU hands out: encoders, passes, the map promise. Blocks are copied out of
+// the mapped slot into a pooled BlockRing, pass descriptors and bind offsets are prebuilt, and tick
+// parameters are reused.
+import { GpuTimer, Samples } from '../gpu/gpu-timer.js';
 import { ReadbackRing } from '../gpu/readback-ring.js';
+import { BlockRing } from './block-ring.js';
 import { PipelineCache } from '../gpu/pipeline-cache.js';
 import { WgslPreprocessor } from '../gpu/wgsl-preprocessor.js';
 import { EffectShape, EventClass, EventKind, FireFlag, MAX_IMPULSE, Policy, ProxyFlag, SwarmKeys, SwarmOutbound, Team, UnitFlag } from './swarm-contract.js';
@@ -90,13 +94,12 @@ export class Swarm {
     /** @type {SwarmTiming} */
     this.timing = GpuTimer.supported(device) ? (options.timing ?? 'tick') : 'off';
     this.timer = this.timing === 'off' ? null : new GpuTimer(device, this.timing === 'pass' ? K * PASSES.length : K, 'swarm.timer');
-    /** Byte offset of the timings in a readback slot, after the K outbound blocks (8-aligned for BigInt64Array). */
+    /** Byte offset of the timings in a readback slot, after the K outbound blocks (8-aligned: u64 pairs). */
     this.timesAt = (this.outBytes * K + 7) & ~7;
-    this.readback = new ReadbackRing(device, {
-      slots: options.readbackSlots ?? Math.max(6, (options.K ?? 4) + 2),
-      bytes: this.timesAt + (this.timer ? this.timer.bytes : 0),
-      label: 'swarm.readback',
-    });
+    const slots = options.readbackSlots ?? Math.max(6, (options.K ?? 4) + 2);
+    this.readback = new ReadbackRing(device, { slots, bytes: this.timesAt + (this.timer ? this.timer.bytes : 0), label: 'swarm.readback' });
+    /** Harvested blocks until the sim takes them: every slot's worth can be outstanding. */
+    this.blocks = new BlockRing(layout, slots * K);
     /** GPU ms per tick, from timestamps (empty without them). */
     this.gpuTick = new Samples(256);
     /** Per-step GPU ns summed over `passTicks` ticks (`pass` timing only), in PASSES order. */
@@ -139,13 +142,32 @@ export class Swarm {
     this.cache = new PipelineCache(device);
     /** @type {Record<string, GPUComputePipeline>} */
     this.pipelines = {};
-    /** @type {{ encoder: GPUCommandEncoder, slot: import('../gpu/readback-ring.js').ReadbackSlot, ticks: number[] } | null} */
-    this.frame = null;
-    /** @type {Map<number, Int32Array>} */
-    this.arrived = new Map();
+    /** The frame being encoded, and its readback slot (whose `ticks` lists the ticks encoded so far). */
+    /** @type {GPUCommandEncoder | null} */
+    this.encoder = null;
+    /** @type {import('../gpu/readback-ring.js').ReadbackSlot | null} */
+    this.slot = null;
     this.params = new Uint32Array(PARAM_WORDS);
+    /** @type {TickParams} reused by every tick */
+    this.tp = { tick: 0, inBase: 0, prevFires: 0, groups: 0, fires: 0, proxies: 0, effects: 0, requests: 0, flags: 0, field: FIELD_NONE };
     this.fieldSel = 0;
     this.fieldValid = false;
+    // Prebuilt per-tick encoding: dynamic offsets of the K parameter slots, pass descriptors, pipeline names.
+    this.offsets = new Uint32Array(K);
+    for (let k = 0; k < K; k++) this.offsets[k] = k * PARAMS_STRIDE;
+    /** @type {GPUComputePassDescriptor} */
+    this.plainPass = { label: 'swarm.tick' };
+    /** @type {GPUComputePassDescriptor[]} `tick` timing: one per parameter slot */
+    this.tickPasses = [];
+    /** @type {GPUComputePassDescriptor[]} `pass` timing: one per parameter slot and step */
+    this.stepPasses = [];
+    const t = this.timer;
+    if (t && this.timing === 'tick') for (let k = 0; k < K; k++) this.tickPasses.push({ label: 'swarm.tick', timestampWrites: t.writes[k] });
+    if (t && this.timing === 'pass') {
+      for (let k = 0; k < K; k++) for (let i = 0; i < PASSES.length; i++) this.stepPasses.push({ label: `swarm.${PASSES[i]}`, timestampWrites: t.writes[k * PASSES.length + i] });
+    }
+    /** Scan pipelines by mode: blocks, sums, apply. */
+    this.scanNames = [0, 1, 2, 3, 4].map((m) => [`scan${m}.blocks`, `scan${m}.sums`, `scan${m}.apply`]);
   }
 
   /** @param {(path: string) => Promise<string>} load */
@@ -210,61 +232,72 @@ export class Swarm {
    * Starts a frame: returns how many ticks it may encode (0 when every readback slot is in flight).
    */
   beginFrame() {
-    if (this.frame) throw new Error('swarm: beginFrame() twice');
+    if (this.encoder) throw new Error('swarm: beginFrame() twice');
     const slot = this.readback.acquire();
     if (!slot) return 0;
-    this.frame = { encoder: this.device.createCommandEncoder({ label: 'swarm.frame' }), slot, ticks: [] };
+    this.slot = slot;
+    this.encoder = this.device.createCommandEncoder({ label: 'swarm.frame' });
     return this.layout.caps.ticksInFlight;
   }
 
   /** @param {number} tick @param {Int32Array} inbound @param {number} prevFires @param {Int32Array | null} [field] */
   submit(tick, inbound, prevFires, field = null) {
     this.#field(inbound, field);
-    const f = this.frame;
-    if (!f) throw new Error('swarm: submit() outside beginFrame()/endFrame()');
-    const k = f.ticks.length;
+    const encoder = this.encoder;
+    const slot = this.slot;
+    if (!encoder || !slot) throw new Error('swarm: submit() outside beginFrame()/endFrame()');
+    const k = slot.ticks.length;
     if (k >= this.layout.caps.ticksInFlight) throw new Error('swarm: too many ticks in one frame');
     const p = this.#params(tick, k, inbound, prevFires);
     this.#write(k, inbound, p);
-    this.encodeTick(f.encoder, k, p, PASSES.length, true);
-    f.encoder.copyBufferToBuffer(this.buffers.O, 0, f.slot.buffer, k * this.outBytes, this.outBytes);
-    f.ticks.push(tick);
+    this.encodeTick(encoder, k, p, PASSES.length, true);
+    encoder.copyBufferToBuffer(this.buffers.O, 0, slot.buffer, k * this.outBytes, this.outBytes);
+    slot.ticks.push(tick);
   }
 
   /** Submits the frame and maps its readback slot. */
   endFrame() {
-    const f = this.frame;
-    if (!f) return;
-    this.frame = null;
-    const n = f.ticks.length;
-    if (this.timer) this.timer.resolve(f.encoder, this.timing === 'pass' ? n * PASSES.length : n, f.slot.buffer, this.timesAt);
-    this.device.queue.submit([f.encoder.finish()]);
-    if (f.ticks.length) this.readback.submitted(f.slot, f.ticks);
-    else this.readback.release(f.slot);
+    const encoder = this.encoder;
+    const slot = this.slot;
+    if (!encoder || !slot) return;
+    this.encoder = null;
+    this.slot = null;
+    const n = slot.ticks.length;
+    if (this.timer) this.timer.resolve(encoder, this.timing === 'pass' ? n * PASSES.length : n, slot.buffer, this.timesAt);
+    this.device.queue.submit([encoder.finish()]);
+    if (n) this.readback.submitted(slot, slot.ticks);
+    else this.readback.release(slot);
   }
 
   /** Collects the blocks of every harvested slot (call at frame start). */
   harvest() {
-    return this.readback.harvest((slot, data) => {
-      const n = slot.ticks.length;
-      for (let k = 0; k < n; k++) {
-        this.arrived.set(slot.ticks[k], SwarmOutbound.canonicalize(this.layout, new Int32Array(data, k * this.outBytes, this.outBytes >> 2)));
-      }
-      if (this.timer) this.#times(new BigInt64Array(data, this.timesAt, (this.timing === 'pass' ? n * PASSES.length : n) * (PAIR_BYTES >> 3)), n);
-    });
+    return this.readback.harvest(this.#harvestSlot);
   }
 
-  /** Records the timings of a harvested frame of `n` ticks. @param {BigInt64Array} pairs @param {number} n */
-  #times(pairs, n) {
+  /**
+   * Copies a mapped slot's blocks into the block ring (canonical event order) and records its timings.
+   * One view per slot: a mapped range is a new ArrayBuffer each time.
+   * @param {import('../gpu/readback-ring.js').ReadbackSlot} slot @param {ArrayBuffer} data
+   */
+  #harvestSlot = (slot, data) => {
+    const words = new Int32Array(data);
+    const n = slot.ticks.length;
+    const stride = this.outBytes >> 2;
+    for (let k = 0; k < n; k++) SwarmOutbound.canonicalize(this.layout, this.blocks.put(slot.ticks[k], words, k * stride));
+    if (this.timer) this.#times(words, this.timesAt >> 2, n);
+  };
+
+  /** Records the timings of a harvested frame of `n` ticks, pairs from word `at`. @param {Int32Array} words @param {number} at @param {number} n */
+  #times(words, at, n) {
     if (this.timing === 'tick') {
-      for (let k = 0; k < n; k++) this.gpuTick.push(GpuTimer.ns(pairs, k) / 1e6);
+      for (let k = 0; k < n; k++) this.gpuTick.push(GpuTimer.ns(words, at, k) / 1e6);
       return;
     }
     const S = PASSES.length;
     for (let k = 0; k < n; k++) {
       let sum = 0;
       for (let i = 0; i < S; i++) {
-        const ns = GpuTimer.ns(pairs, k * S + i);
+        const ns = GpuTimer.ns(words, at, k * S + i);
         this.passNs[i] += ns;
         sum += ns;
       }
@@ -296,28 +329,29 @@ export class Swarm {
     this.passTicks = 0;
   }
 
-  /** @param {number} tick */
+  /**
+   * The outbound block of `tick`, or null if it has not arrived. It stays valid until the next `take`
+   * (the block ring reuses it then).
+   * @param {number} tick
+   */
   take(tick) {
-    const block = this.arrived.get(tick);
-    if (!block) return null;
-    this.arrived.delete(tick);
-    return block;
+    return this.blocks.take(tick);
   }
 
-  /** @param {number} tick @param {number} k @param {Int32Array} inbound @param {number} prevFires @returns {TickParams} */
+  /** Fills the reused tick parameters. @param {number} tick @param {number} k @param {Int32Array} inbound @param {number} prevFires @returns {TickParams} */
   #params(tick, k, inbound, prevFires) {
-    return {
-      tick,
-      inBase: k * this.layout.L.inWords,
-      prevFires,
-      groups: inbound[IH.GROUPS],
-      fires: inbound[IH.FIRES],
-      proxies: inbound[IH.PROXIES],
-      effects: inbound[IH.EFFECTS],
-      requests: inbound[IH.REQUESTS],
-      flags: inbound[IH.FLAGS],
-      field: this.fieldValid ? this.fieldSel : FIELD_NONE,
-    };
+    const p = this.tp;
+    p.tick = tick;
+    p.inBase = k * this.layout.L.inWords;
+    p.prevFires = prevFires;
+    p.groups = inbound[IH.GROUPS];
+    p.fires = inbound[IH.FIRES];
+    p.proxies = inbound[IH.PROXIES];
+    p.effects = inbound[IH.EFFECTS];
+    p.requests = inbound[IH.REQUESTS];
+    p.flags = inbound[IH.FLAGS];
+    p.field = this.fieldValid ? this.fieldSel : FIELD_NONE;
+    return p;
   }
 
   /**
@@ -355,71 +389,96 @@ export class Swarm {
   /**
    * Encodes the first `count` passes of one tick (all of them normally; fewer for per-pass diffs). A timed
    * tick writes timestamp pair k (`tick` timing) or pairs k·S … k·S + count − 1, one compute pass per step.
+   * Nothing here allocates but the passes themselves.
    * @param {GPUCommandEncoder} encoder @param {number} k parameter slot @param {TickParams} p @param {number} count
    * @param {boolean} [timed]
    */
   encodeTick(encoder, k, p, count, timed = false) {
-    const L = this.layout.L;
-    const pl = this.pipelines;
-    const wg = this.wg;
-    const groups = (/** @type {number} */ n) => Math.ceil(n / wg);
-    if (p.flags & 1 && count > 0) {
+    if (p.flags & INFLAG.RESET && count > 0) {
       // Swarm reset: the pools and the scratch start over, exactly like fresh buffers (ClearPass twin).
       encoder.clearBuffer(this.buffers.U);
       encoder.clearBuffer(this.buffers.P);
       encoder.clearBuffer(this.buffers.A);
     }
-    const t = timed ? this.timer : null;
-    const split = t !== null && this.timing === 'pass';
-    const begin = (/** @type {string} */ label, /** @type {GPUComputePassTimestampWrites | undefined} */ timestampWrites) => {
-      const pass = encoder.beginComputePass({ label, timestampWrites });
-      pass.setBindGroup(0, this.bindGroup, [k * PARAMS_STRIDE]);
-      return pass;
-    };
-    let pass = begin(split ? `swarm.${PASSES[0]}` : `swarm.tick${p.tick}`, t ? t.writes[split ? k * PASSES.length : k] : undefined);
-    const run = (/** @type {string} */ name, /** @type {number} */ x) => {
-      if (x <= 0) return;
-      pass.setPipeline(pl[name]);
-      pass.dispatchWorkgroups(x);
-    };
-    const scan = (/** @type {number} */ mode, /** @type {number} */ n) => {
-      run(`scan${mode}.blocks`, Math.ceil(n / 256));
-      run(`scan${mode}.sums`, 1);
-      run(`scan${mode}.apply`, groups(n));
-    };
-    /** @type {Record<string, () => void>} */
-    const steps = {
-      clear: () => run('clear', groups(Math.max(L.cells, L.outWords))),
-      freeScan: () => {
-        scan(0, L.unitCap);
-        scan(1, L.shotCap);
-        scan(3, L.pickCap);
-        scan(4, L.unitCap);
-      },
-      shotSpawn: () => run('shotSpawn', groups(p.prevFires)),
-      pickupSpawn: () => run('pickupSpawn', groups(L.unitCap)), // drops are known on the GPU only
-      unitSpawn: () => run('unitSpawn', groups(p.requests)),
-      binCount: () => run('binCount', groups(L.unitCap)),
-      binScan: () => scan(2, L.cells),
-      binScatter: () => run('binScatter', groups(L.unitCap)),
-      steer: () => run('steer', groups(L.unitCap)),
-      integrate: () => run('integrate', groups(L.unitCap)),
-      projectiles: () => run('projectiles', groups(L.shotCap)),
-      effects: () => run('effects', p.effects), // one workgroup per effect
-      resolve: () => run('resolve', groups(L.unitCap)),
-      contact: () => run('contact', p.proxies),
-      targeting: () => run('targeting', p.fires),
-      pickups: () => run('pickups', groups(L.pickCap)),
-      finalize: () => run('finalize', 1),
-    };
+    const S = PASSES.length;
+    const split = timed && this.stepPasses.length > 0;
+    let pass = encoder.beginComputePass(split ? this.stepPasses[k * S] : timed && this.tickPasses.length ? this.tickPasses[k] : this.plainPass);
+    pass.setBindGroup(0, this.bindGroup, this.offsets, k, 1);
     for (let i = 0; i < count; i++) {
       if (split && i > 0) {
         pass.end();
-        pass = begin(`swarm.${PASSES[i]}`, /** @type {GpuTimer} */ (t).writes[k * PASSES.length + i]);
+        pass = encoder.beginComputePass(this.stepPasses[k * S + i]);
+        pass.setBindGroup(0, this.bindGroup, this.offsets, k, 1);
       }
-      steps[PASSES[i]]();
+      this.#step(pass, PASSES[i], p);
     }
     pass.end();
+  }
+
+  /** Dispatches one step of the pass chain. @param {GPUComputePassEncoder} pass @param {string} step @param {TickParams} p */
+  #step(pass, step, p) {
+    const L = this.layout.L;
+    switch (step) {
+      case 'clear':
+        return this.#run(pass, 'clear', this.#groups(L.cells > L.outWords ? L.cells : L.outWords));
+      case 'freeScan':
+        this.#scan(pass, 0, L.unitCap);
+        this.#scan(pass, 1, L.shotCap);
+        this.#scan(pass, 3, L.pickCap);
+        return this.#scan(pass, 4, L.unitCap);
+      case 'shotSpawn':
+        return this.#run(pass, 'shotSpawn', this.#groups(p.prevFires));
+      case 'pickupSpawn':
+        return this.#run(pass, 'pickupSpawn', this.#groups(L.unitCap)); // drops are known on the GPU only
+      case 'unitSpawn':
+        return this.#run(pass, 'unitSpawn', this.#groups(p.requests));
+      case 'binCount':
+        return this.#run(pass, 'binCount', this.#groups(L.unitCap));
+      case 'binScan':
+        return this.#scan(pass, 2, L.cells);
+      case 'binScatter':
+        return this.#run(pass, 'binScatter', this.#groups(L.unitCap));
+      case 'steer':
+        return this.#run(pass, 'steer', this.#groups(L.unitCap));
+      case 'integrate':
+        return this.#run(pass, 'integrate', this.#groups(L.unitCap));
+      case 'projectiles':
+        return this.#run(pass, 'projectiles', this.#groups(L.shotCap));
+      case 'effects':
+        return this.#run(pass, 'effects', p.effects); // one workgroup per effect
+      case 'resolve':
+        return this.#run(pass, 'resolve', this.#groups(L.unitCap));
+      case 'contact':
+        return this.#run(pass, 'contact', p.proxies);
+      case 'targeting':
+        return this.#run(pass, 'targeting', p.fires);
+      case 'pickups':
+        return this.#run(pass, 'pickups', this.#groups(L.pickCap));
+      case 'finalize':
+        return this.#run(pass, 'finalize', 1);
+      default:
+        throw new Error(`swarm: unknown step ${step}`);
+    }
+  }
+
+  /** @param {GPUComputePassEncoder} pass @param {string} name @param {number} x workgroups */
+  #run(pass, name, x) {
+    if (x <= 0) return;
+    pass.setPipeline(this.pipelines[name]);
+    pass.dispatchWorkgroups(x);
+  }
+
+  /** The three-level scan of `n` elements in `mode`. @param {GPUComputePassEncoder} pass @param {number} mode @param {number} n */
+  #scan(pass, mode, n) {
+    const names = this.scanNames[mode];
+    this.#run(pass, names[0], Math.ceil(n / 256));
+    this.#run(pass, names[1], 1);
+    this.#run(pass, names[2], this.#groups(n));
+  }
+
+  /** Workgroups for `n` invocations. @param {number} n */
+  #groups(n) {
+    return Math.ceil(n / this.wg);
   }
 
   // ---- tests and tools ------------------------------------------------------------------------

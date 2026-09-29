@@ -7,6 +7,7 @@ import { FrameDriver } from '../core/frame-driver.js';
 import { Heap } from '../core/heap.js';
 import { TICK_HZ } from '../core/units.js';
 import { GpuDevice } from '../gpu/gpu-device.js';
+import { Samples } from '../gpu/gpu-timer.js';
 import { ActionMap } from '../input/action-map.js';
 import { InputRing } from '../input/input-ring.js';
 import { InputState } from '../input/input-state.js';
@@ -98,8 +99,12 @@ export class EngineHost {
     this.last = -1;
     this.acc = 0;
     this.stats = { fps: 0, frameMs: 0, simMs: 0, ticks: 0, skipped: 0, readbackP95: 0, gpuWaits: 0, swarmGpuP95: 0 };
+    /** Recent frame intervals, ms (the perf report's p50 and p99). */
+    this.frameTimes = new Samples(512);
     /** Frames submitted to the GPU and not finished yet. */
     this.inFlight = 0;
+    /** Counts a frame of the current device as finished (set per device by #watch). */
+    this.workDone = () => {};
     /** Bumped for every new device, so events of a lost one are ignored. */
     this.deviceGen = 0;
     this.recovering = false;
@@ -147,6 +152,10 @@ export class EngineHost {
   /** Recovers from device losses and reports validation errors, for the current device only. @param {GpuDevice} gpu */
   #watch(gpu) {
     const gen = ++this.deviceGen;
+    // Frames finished on this device (one callback per device, not one closure per frame).
+    this.workDone = () => {
+      if (gen === this.deviceGen) this.inFlight--;
+    };
     gpu.lost.then((info) => {
       if (gen === this.deviceGen) this.recover(info);
     });
@@ -361,6 +370,7 @@ export class EngineHost {
       swarm?.harvest();
       const dt = this.last < 0 ? TICK_MS : now - this.last;
       this.last = now;
+      this.frameTimes.push(dt);
       this.acc += Math.min(dt, 250);
       const t0 = performance.now();
       let ticks = 0;
@@ -368,9 +378,11 @@ export class EngineHost {
       const cap = swarm ? Math.min(MAX_TICKS_PER_FRAME, swarm.beginFrame()) : MAX_TICKS_PER_FRAME;
       try {
         while (this.acc >= TICK_MS && ticks < cap) {
-          const [w0, w1] = this.actions.sample(this.input);
-          if (sim.stamp(w0, w1, this.input.ui, this.input.uiCount)) this.input.uiCount = 0;
-          if (!(await sim.step())) break; // stalled on a late swarm block: retry next frame
+          const rec = this.actions.sample(this.input);
+          if (sim.stamp(rec[0], rec[1], this.input.ui, this.input.uiCount)) this.input.uiCount = 0;
+          // Synchronous unless a system waits on job workers; false = stalled on a late swarm block.
+          const ran = sim.advance();
+          if (ran === false || (ran !== true && !(await ran))) break; // retry next frame
           this.acc -= TICK_MS;
           ticks++;
         }
@@ -389,11 +401,7 @@ export class EngineHost {
       }
       this.render();
       this.inFlight++;
-      const gen = this.deviceGen;
-      const done = () => {
-        if (gen === this.deviceGen) this.inFlight--;
-      };
-      /** @type {GpuDevice} */ (this.gpu).device.queue.onSubmittedWorkDone().then(done, done);
+      /** @type {GpuDevice} */ (this.gpu).device.queue.onSubmittedWorkDone().then(this.workDone, this.workDone);
       this.frames++;
       if (this.frames % HUD_EVERY === 0) this.writeHud();
       if (this.frames % 30 === 1) {
@@ -402,8 +410,15 @@ export class EngineHost {
           type: 'stats',
           frames: this.frames,
           gpuWaits: s.gpuWaits,
-          swarm: rb ? { tick: sim.tick, stalls: sim.stalls, starved: rb.starved, lost: rb.lost, reason: rb.lostReason, slots: rb.slots.map((x) => x.state).join(','), arrived: swarm.arrived.size } : null,
-          perf: { fps: s.fps, simMs: s.simMs, readbackP95: s.readbackP95, swarmGpu: swarm ? swarm.gpuTiming() : null },
+          swarm: rb ? { tick: sim.tick, stalls: sim.stalls, starved: rb.starved, lost: rb.lost, reason: rb.lostReason, slots: rb.slots.map((x) => x.state).join(','), pending: swarm.blocks.pending, blocks: swarm.blocks.allocated } : null,
+          perf: {
+            fps: s.fps,
+            simMs: s.simMs,
+            frameP50: this.frameTimes.percentile(0.5),
+            frameP99: this.frameTimes.percentile(0.99),
+            readbackP95: s.readbackP95,
+            swarmGpu: swarm ? swarm.gpuTiming() : null,
+          },
         });
       }
     } catch (err) {

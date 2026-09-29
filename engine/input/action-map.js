@@ -26,12 +26,16 @@ export const DEFAULT_BINDINGS = {
 };
 
 const DIAGONAL = Math.round(MOVE_MAX * Math.SQRT1_2);
+/** The stick's quantized move, reused by every call (read it right away). */
+const STICK = /** @type {[number, number]} */ ([0, 0]);
 
 export class ActionMap {
   static DEADZONE = 0.2;
 
   /** @param {Bindings} [bindings] */
   constructor(bindings = DEFAULT_BINDINGS) {
+    /** The record `sample` returns, reused every tick. */
+    this.record = new Uint32Array(2);
     /** @type {Record<string, { keys: number[], pad: number }>} */
     this.actions = {};
     for (const [name, b] of Object.entries(bindings)) {
@@ -48,9 +52,9 @@ export class ActionMap {
   }
 
   /**
-   * The input record for the next tick.
+   * The input record for the next tick: words 0 and 1, in a reused array (read it before the next call).
    * @param {import('./input-state.js').InputState} s
-   * @returns {[number, number]}
+   * @returns {Uint32Array}
    */
   sample(s) {
     let mx = 0;
@@ -62,7 +66,9 @@ export class ActionMap {
       mx = kx * m;
       my = ky * m;
     } else {
-      [mx, my] = ActionMap.stick(s.padLX, s.padLY);
+      const stick = ActionMap.stick(s.padLX, s.padLY);
+      mx = stick[0];
+      my = stick[1];
     }
     let buttons = 0;
     if (this.held(s, 'dash')) buttons |= Buttons.DASH;
@@ -72,12 +78,15 @@ export class ActionMap {
     if (this.held(s, 'interact')) buttons |= Buttons.INTERACT;
     if (this.held(s, 'pause')) buttons |= Buttons.PAUSE;
     const flags = s.device === 1 ? InputFlags.GAMEPAD : 0;
-    return InputRecord.pack(mx, my, 0, buttons, flags, 0);
+    const r = this.record;
+    r[0] = InputRecord.word0(mx, my, 0);
+    r[1] = InputRecord.word1(buttons, flags, 0);
+    return r;
   }
 
   /**
    * A stick (i16 axes, +y down) to a quantized move with a radial deadzone, rescaled so the edge of
-   * the deadzone is zero and full tilt is MOVE_MAX; +y up in the result.
+   * the deadzone is zero and full tilt is MOVE_MAX; +y up in the result. The pair is reused by every call.
    * @param {number} x @param {number} y
    * @returns {[number, number]}
    */
@@ -85,8 +94,14 @@ export class ActionMap {
     const fx = x / 32767;
     const fy = -y / 32767;
     const len = Math.hypot(fx, fy);
-    if (len <= ActionMap.DEADZONE) return [0, 0];
+    if (len <= ActionMap.DEADZONE) {
+      STICK[0] = 0;
+      STICK[1] = 0;
+      return STICK;
+    }
     const scaled = Math.min(1, (len - ActionMap.DEADZONE) / (1 - ActionMap.DEADZONE)) / len;
-    return [Math.round(fx * scaled * MOVE_MAX), Math.round(fy * scaled * MOVE_MAX)];
+    STICK[0] = Math.round(fx * scaled * MOVE_MAX);
+    STICK[1] = Math.round(fy * scaled * MOVE_MAX);
+    return STICK;
   }
 }

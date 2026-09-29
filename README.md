@@ -112,6 +112,7 @@ npm run electron:dev    # the desktop shell, serving the repo
 npm run build           # production bundle in dist/web (hashed, WGSL inlined, _headers)
 npm run electron        # build, then the desktop shell on dist/web
 npm run replay -- f.json  # replay an exported run in Node on the JS reference swarm
+npm run soak -- --minutes 10  # play the demo and measure GC pauses on every thread (M2 budget: p99 ≤ 4 ms)
 ```
 
 **The tech demo** (`npm run dev`, then open the page):

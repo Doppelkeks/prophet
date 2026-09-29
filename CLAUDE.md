@@ -22,6 +22,7 @@ Keep code and docs in sync.
 | `npm run electron:dev` | Electron serving the repo root |
 | `npm run replay -- f.json` | Replay an exported run (`__px.exportReplay()`) in Node on the JS reference swarm |
 | `/tools/stress/` (dev server) | Swarm stress scene: GPU ms per tick, readback p95, event overflow (`?units=&shots=&ticks=&timing=pass`) |
+| `npm run soak -- --minutes 10` | Plays the demo; GC pauses per thread from Chrome traces, frame times, stalls (`--swiftshader` without a GPU) |
 
 ## Rules
 
@@ -31,7 +32,7 @@ Keep code and docs in sync.
   - `npm run lint:sim` enforces this. An exception needs `// sim-allow: <reason>` on the line.
 - `engine/` never imports `game/`. Entry points live only in `game/app/`.
 - Only `engine/jobs/job-worker-loop.js` may call `Atomics.wait`. The engine worker never blocks.
-- Hot paths: no allocation, no closures, index typed-array views by offset.
+- Hot paths: no allocation, no closures, index typed-array views by offset. The frame loop calls `SimCore.advance()` (sync unless a system waits on job workers); readback blocks are pooled (`BlockRing`) and valid until the next `take`.
 - Manifest order comes from explicit `static key` strings, never `Class.name`.
 - WebGPU needs a secure context. Tests load `http://localhost` with COOP/COEP (the dev server does this).
 - The GPU swarm must stay bit-exact with `engine/swarm/reference/`, and the browser tests compare them every tick.

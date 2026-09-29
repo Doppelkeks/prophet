@@ -285,6 +285,11 @@ The first implementation (M2) runs a subset of the chain, with the same determin
 - **Contract today.**
   - Actor proxies are 32 B. Word 6 is `aux`, a collector's magnet radius.
   - The inbound header carries `SCRAP_IN`, a scrap deposit from the CPU.
+- **Blocks on the CPU.** `Swarm.harvest` copies each tick's block from the mapped readback slot into a pooled `BlockRing` (`engine/swarm/block-ring.js`), without allocating:
+  - It copies the words before the event records, plus only the records present, and zeroes stale records of a reused block. A block therefore equals what the GPU wrote.
+  - `take(tick)` returns the block, and it stays valid until the next `take`.
+  - `SimCore` applies it through one reused `SwarmOutbound` view (`attach`).
+  - The frame loop calls `SimCore.advance()`, which returns a plain boolean unless a system waits on job workers. A tick therefore allocates nothing on the way from the harvest to the sim.
 - **GPU backend.** The GPU backend is `engine/swarm/swarm.js`.
   - The WGSL kernels live in `engine/swarm/kernels/`, one file per pass. They include `swarm-common.wgsl` for bindings and helpers. A kernel that needs atomics on `A` or `O` sets `#define A_ATOMIC` / `O_ATOMIC` first; another pass may declare the same buffer as plain `array<i32>`.
   - The `Layout` struct and every shared constant are generated from `swarm-layout.js` and prepended to each kernel, so the JS and WGSL numbers can't drift apart.
@@ -379,6 +384,9 @@ The player field ([06: navigation](06-world.md#navigation)) shares the swarm's b
 - Types flagged `REPORT` emit a 16 B `UNIT_DIED` event (gameplay class) when they die: `kind | class << 8 | type << 16`, then slot and generation, the credited source, and the position in 1/16 m.
 - A kernel appends through an atomic cursor. Past the per-tick cap it sets its class's overflow bit instead.
 - Both backends sort the records of a block (`SwarmOutbound.canonicalize`, comparing words as unsigned) before the sim takes it. The GPU's race order therefore never reaches the simulation, and the equivalence tests compare the event region as a sorted multiset.
+  - The sort is an in-place heap sort: allocation-free, and O(n log n) even for a full buffer.
+  - It takes ~0.2 ms for 1,000 records and ~2 ms for a full 8,192-record `high` buffer; the insertion sort it replaced took ~330 ms.
+  - The records have a total order, so the result is the same sequence as before (the golden hashes held).
 - `SimCore` counts blocks with an overflow bit as **taints**. Replay documents carry the count, and `Replay.run` flags a tainted run instead of expecting it to match.
 
 ## CPU-GPU contract

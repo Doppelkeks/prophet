@@ -42,9 +42,11 @@ export class ObliqueCamera {
    * Upscale sampling offset in internal pixels: the sub-pixel remainder rounded to whole output pixels.
    * Texture rows grow downward, so v flips.
    * @param {number} k integer scale
-   * @returns {[number, number]}
+   * @param {number[] | Float32Array} [out] where to write (the renderer reuses one per frame)
    */
-  offset(k) {
-    return [Math.round((this.U - this.snapU) * k) / k, -Math.round((this.V - this.snapV) * k) / k];
+  offset(k, out = [0, 0]) {
+    out[0] = Math.round((this.U - this.snapU) * k) / k;
+    out[1] = -Math.round((this.V - this.snapV) * k) / k;
+    return out;
   }
 }

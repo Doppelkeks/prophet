@@ -211,7 +211,7 @@ The shared heap is a single `WebAssembly.Memory` with a fixed size: initial = ma
 | Item | Target | Validated in |
 |---|---|---|
 | JS heap (non-shared, garbage-collected objects) | ≤ 96 MB | M2 |
-| GC pause, p99 over a 10-min run | ≤ 4 ms | M2 |
+| GC pause, p99 over a 10-min run (`npm run soak -- --minutes 10`) | ≤ 4 ms | M2 |
 
 ### GPU memory
 

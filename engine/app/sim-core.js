@@ -72,6 +72,8 @@ export class SimCore {
     this.pendingReset = false;
     this.engineCmd = new Uint32Array(UI_WORDS);
     this.empty = new Int32Array(this.swarm ? this.swarm.backend.layout.L.outWords : 0);
+    /** The view of the block applied this tick, reused every tick. */
+    this.outView = this.swarm ? new SwarmOutbound(this.swarm.backend.layout, this.#emptyBlock(0)) : null;
   }
 
   /**
@@ -129,6 +131,16 @@ export class SimCore {
    * @returns {Promise<boolean>} whether the tick ran
    */
   async step() {
+    return this.advance();
+  }
+
+  /**
+   * `step` without the promise: true if the tick ran, false if it stalled, and a promise (of true) only
+   * when a system had to wait for job workers. The engine's frame loop uses it, so a tick allocates
+   * nothing on the way.
+   * @returns {boolean | Promise<boolean>}
+   */
+  advance() {
     const t = this.tick;
     if (!this.log.has(t)) throw new Error(`sim: no input record for tick ${t}`);
     const res = this.resources;
@@ -159,7 +171,7 @@ export class SimCore {
             return false;
           }
         }
-        const out = new SwarmOutbound(swarm.backend.layout, block);
+        const out = /** @type {SwarmOutbound} */ (this.outView).attach(block);
         if (out.tick !== b) throw new Error(`sim: swarm block of tick ${out.tick} arrived for tick ${b}`);
         if (out.eventOverflow !== 0) this.taints++;
         res.swarmOut = out;
@@ -177,9 +189,16 @@ export class SimCore {
     input.uiAt = this.log.uiAt(t);
     input.uiCount = this.log.uiCount(t);
     res.tick = t;
-    await this.scheduler.tick();
+    const wait = this.scheduler.tick();
+    if (wait) return wait.then(() => this.#endTick(t)); // only when a system ran on job workers
+    return this.#endTick(t);
+  }
+
+  /** Submits tick `t`'s swarm block and moves to the next tick. @param {number} t @returns {true} */
+  #endTick(t) {
+    const swarm = this.swarm;
     if (swarm) {
-      const inbound = /** @type {SwarmInbound} */ (res.swarm);
+      const inbound = /** @type {SwarmInbound} */ (this.resources.swarm);
       swarm.backend.submit(t, inbound.finish(t), this.prevFires, inbound.field);
       this.prevFires = inbound.fires;
     }

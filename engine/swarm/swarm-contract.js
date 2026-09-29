@@ -305,7 +305,14 @@ export class SwarmOutbound {
   constructor(layout, block) {
     this.layout = layout;
     this.block = block;
+    this.attach(block);
+  }
+
+  /** Points the view at another block: the sim reuses one view for every tick. @param {Int32Array} block */
+  attach(block) {
     if (block[OH.MAGIC] !== OUT_MAGIC) throw new Error('swarm: outbound block without its magic word');
+    this.block = block;
+    return this;
   }
 
   get tick() {
@@ -383,38 +390,51 @@ export class SwarmOutbound {
   /**
    * Sorts a block's events by their full record, so identical records are interchangeable and the block
    * no longer depends on which GPU thread won the event cursor (docs/engine/05-gpu-swarm.md#cpu-gpu-contract).
-   * Both backends apply it before a block is taken. Allocation-free: an insertion sort over 4-word records.
+   * Both backends apply it before a block is taken. An in-place heap sort over 4-word records: allocation-free,
+   * and O(n log n) for a full event buffer.
    * @param {import('./swarm-layout.js').SwarmLayout} layout @param {Int32Array} block
    */
   static canonicalize(layout, block) {
     const L = layout.L;
     const n = Math.min(block[OH.EVENTS], L.eventCap);
     const base = L.oEvents;
-    for (let i = 1; i < n; i++) {
-      const a0 = block[base + i * EVENT_WORDS];
-      const a1 = block[base + i * EVENT_WORDS + 1];
-      const a2 = block[base + i * EVENT_WORDS + 2];
-      const a3 = block[base + i * EVENT_WORDS + 3];
-      let j = i - 1;
-      while (j >= 0 && SwarmOutbound.#after(block, base + j * EVENT_WORDS, a0, a1, a2, a3)) {
-        block.copyWithin(base + (j + 1) * EVENT_WORDS, base + j * EVENT_WORDS, base + (j + 1) * EVENT_WORDS);
-        j--;
-      }
-      const at = base + (j + 1) * EVENT_WORDS;
-      block[at] = a0;
-      block[at + 1] = a1;
-      block[at + 2] = a2;
-      block[at + 3] = a3;
+    // Heap sort: in place, O(n log n) even for a full buffer, no allocation. The order is total over the
+    // four words, so the result is the one sorted sequence whatever order the GPU wrote.
+    for (let i = (n >> 1) - 1; i >= 0; i--) SwarmOutbound.#sift(block, base, i, n);
+    for (let end = n - 1; end > 0; end--) {
+      SwarmOutbound.#swap(block, base + end * EVENT_WORDS, base);
+      SwarmOutbound.#sift(block, base, 0, end);
     }
     return block;
   }
 
-  /** Whether the record at `at` sorts after (a0..a3), comparing words as unsigned. @param {Int32Array} b @param {number} at @param {number} a0 @param {number} a1 @param {number} a2 @param {number} a3 */
-  static #after(b, at, a0, a1, a2, a3) {
-    if (b[at] !== a0) return b[at] >>> 0 > a0 >>> 0;
-    if (b[at + 1] !== a1) return b[at + 1] >>> 0 > a1 >>> 0;
-    if (b[at + 2] !== a2) return b[at + 2] >>> 0 > a2 >>> 0;
-    return b[at + 3] >>> 0 > a3 >>> 0;
+  /** Moves record `i` down the max-heap of the first `n` records. @param {Int32Array} b @param {number} base @param {number} i @param {number} n */
+  static #sift(b, base, i, n) {
+    for (;;) {
+      let c = (i << 1) + 1;
+      if (c >= n) return;
+      if (c + 1 < n && SwarmOutbound.#less(b, base + c * EVENT_WORDS, base + (c + 1) * EVENT_WORDS)) c++;
+      if (!SwarmOutbound.#less(b, base + i * EVENT_WORDS, base + c * EVENT_WORDS)) return;
+      SwarmOutbound.#swap(b, base + i * EVENT_WORDS, base + c * EVENT_WORDS);
+      i = c;
+    }
+  }
+
+  /** Whether the record at `x` sorts before the one at `y`, comparing words as unsigned. @param {Int32Array} b @param {number} x @param {number} y */
+  static #less(b, x, y) {
+    for (let w = 0; w < EVENT_WORDS; w++) {
+      if (b[x + w] !== b[y + w]) return b[x + w] >>> 0 < b[y + w] >>> 0;
+    }
+    return false;
+  }
+
+  /** Swaps the records at `x` and `y`. @param {Int32Array} b @param {number} x @param {number} y */
+  static #swap(b, x, y) {
+    for (let w = 0; w < EVENT_WORDS; w++) {
+      const t = b[x + w];
+      b[x + w] = b[y + w];
+      b[y + w] = t;
+    }
   }
 
   /** Live units in map cell (mx, my) this tick. @param {number} mx @param {number} my */

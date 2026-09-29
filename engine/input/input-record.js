@@ -18,7 +18,17 @@ export class InputRecord {
    * @returns {[number, number]}
    */
   static pack(moveX, moveY, aim, buttons, flags, ui) {
-    return [((moveX & 0xff) | ((moveY & 0xff) << 8) | ((aim & 0xffff) << 16)) >>> 0, ((buttons & 0xffff) | ((flags & 0xff) << 16) | ((ui & 0xff) << 24)) >>> 0];
+    return [InputRecord.word0(moveX, moveY, aim), InputRecord.word1(buttons, flags, ui)];
+  }
+
+  /** Word 0 of a record: move and aim. @param {number} moveX @param {number} moveY @param {number} aim */
+  static word0(moveX, moveY, aim) {
+    return ((moveX & 0xff) | ((moveY & 0xff) << 8) | ((aim & 0xffff) << 16)) >>> 0;
+  }
+
+  /** Word 1 of a record: buttons, flags, UI command count. @param {number} buttons @param {number} flags @param {number} ui */
+  static word1(buttons, flags, ui) {
+    return ((buttons & 0xffff) | ((flags & 0xff) << 16) | ((ui & 0xff) << 24)) >>> 0;
   }
 
   /** @param {number} w0 */

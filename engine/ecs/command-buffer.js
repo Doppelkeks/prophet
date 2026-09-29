@@ -16,6 +16,8 @@ import { Field, FieldType } from './component.js';
 export const Op = Object.freeze({ SPAWN: 1, DESPAWN: 2, ADD: 3, REMOVE: 4, SET: 5 });
 const DATA = 16;
 const SEGMENT = 3;
+/** Words per segment in CommandApplier.segs. */
+const SEG_FIELDS = 5;
 
 const f32 = new Float32Array(1);
 const f32Bits = new Int32Array(f32.buffer);
@@ -149,33 +151,78 @@ export class CommandApplier {
     /** @type {number[]} */
     this.values = [];
     this.records = 0;
+    /** Segments of one apply, SEG_FIELDS words each: system, chunk, participant, first record word, words. */
+    this.segs = new Int32Array(SEG_FIELDS * 256);
+    /** Segment indices in apply order. */
+    this.order = new Int32Array(256);
   }
 
   /**
-   * Applies every recorded segment in (system ID, chunk index) order, then clears all buffers.
+   * Applies every recorded segment in (system ID, chunk index, participant) order, then clears all
+   * buffers. Allocation-free: segments go into preallocated arrays (grown only past their high-water mark).
    * @returns {number} segments applied
    */
   apply() {
     const i32 = this.i32;
     const w = this.world;
-    /** @type {number[][]} [system, chunk, participant, first record word, words] */
-    const segments = [];
+    let n = 0;
     for (let p = 0; p < w.cmdParticipants; p++) {
       const base = w.cmdW + p * w.cmdStride;
       const data = base + DATA;
       const len = i32[base];
       for (let pos = 0; pos < len; ) {
         const words = i32[data + pos + 2];
-        segments.push([i32[data + pos], i32[data + pos + 1], p, data + pos + SEGMENT, words]);
+        if (n === this.order.length) this.#grow();
+        const at = n * SEG_FIELDS;
+        this.segs[at] = i32[data + pos];
+        this.segs[at + 1] = i32[data + pos + 1];
+        this.segs[at + 2] = p;
+        this.segs[at + 3] = data + pos + SEGMENT;
+        this.segs[at + 4] = words;
+        this.order[n] = n;
+        n++;
         pos += SEGMENT + words;
       }
     }
-    if (!segments.length) return 0;
-    segments.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+    if (!n) return 0;
+    // Insertion sort of the indices: every key is unique, and each participant records in system order,
+    // so the input is nearly sorted.
+    const segs = this.segs;
+    const order = this.order;
+    for (let i = 1; i < n; i++) {
+      const k = order[i];
+      let j = i - 1;
+      while (j >= 0 && CommandApplier.#after(segs, order[j], k)) {
+        order[j + 1] = order[j];
+        j--;
+      }
+      order[j + 1] = k;
+    }
     w.bumpClock();
-    for (const s of segments) this.#segment(s[3], s[4]);
+    for (let i = 0; i < n; i++) {
+      const at = order[i] * SEG_FIELDS;
+      this.#segment(segs[at + 3], segs[at + 4]);
+    }
     for (let p = 0; p < w.cmdParticipants; p++) i32[w.cmdW + p * w.cmdStride] = 0;
-    return segments.length;
+    return n;
+  }
+
+  /** Whether segment `a` applies after segment `b`. @param {Int32Array} segs @param {number} a @param {number} b */
+  static #after(segs, a, b) {
+    const x = a * SEG_FIELDS;
+    const y = b * SEG_FIELDS;
+    if (segs[x] !== segs[y]) return segs[x] > segs[y];
+    if (segs[x + 1] !== segs[y + 1]) return segs[x + 1] > segs[y + 1];
+    return segs[x + 2] > segs[y + 2];
+  }
+
+  #grow() {
+    const segs = new Int32Array(this.segs.length * 2);
+    segs.set(this.segs);
+    this.segs = segs;
+    const order = new Int32Array(this.order.length * 2);
+    order.set(this.order);
+    this.order = order;
   }
 
   /** @param {number} start @param {number} words */

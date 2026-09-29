@@ -236,6 +236,13 @@ Systems are grouped into stages. `Input`, `PreSim`, `Sim` and `PostSim` run once
 
 **Execution.** Systems run one at a time, in serial order (`engine/ecs/scheduler.js`). A system with a query runs over the matching ECS chunks either serially on the engine worker or chunk-parallel through the job system; both open the same command segments. Running non-conflicting systems concurrently, which the DAG allows, is left for when profiles show it pays.
 
+**No garbage per tick.**
+- A tick is synchronous until a system has to wait for job workers. `Scheduler.tick()`, `runStage()` and `extract()` return `null` when everything ran on this thread, and a promise for the rest of the tick only when a chunk-parallel system is running.
+- `SimCore.advance()` works the same way for the whole tick; `step()` is its promise-returning wrapper, for tests and replays.
+- The command applier sorts its segments in preallocated typed arrays.
+
+Together these took the demo's sim from ~13 KB of garbage per tick (promises and small arrays, profiled in Node with the inspector's sampling heap profiler) to a few hundred bytes.
+
 **Sync points.** Between stages, the engine worker applies the command buffers, sorts multi-writer event channels, and bumps the layout epoch if archetypes or chunk lists changed.
 
 ```mermaid

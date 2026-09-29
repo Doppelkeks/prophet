@@ -4,6 +4,9 @@ import { System } from '../../../engine/ecs/system.js';
 import { Abilities, Gun, Transform } from '../../components/index.js';
 import { OVERCLOCK } from '../../data/abilities.js';
 
+/** The fire command, reused for every shot (the swarm copies it into the tick's block). */
+const FIRE = { source: 0, x: 0, y: 0, range: 0, damage: 0, speed: 0, life: 0, pierce: 0 };
+
 /** Decides WHEN a gun fires and WHAT it fires; the GPU decides WHO it hits (docs/engine/05-gpu-swarm.md). */
 export class AutoFireSystem extends System {
   static key = 'auto-fire';
@@ -38,7 +41,15 @@ export class AutoFireSystem extends System {
       }
       // Overclock: +40 % fire rate (interval × 5/7).
       i32[cd + r] = i32[oc + r] > 0 ? Fixed.idiv(Math.imul(i32[every + r], OVERCLOCK.fireNum), OVERCLOCK.fireDen) : i32[every + r];
-      swarm.fire({ source: h.u8[source + r], x: i32[x + r], y: i32[y + r], range: i32[range + r], damage: i32[dmg + r], speed: h.u16[speed + r], life: h.u16[life + r], pierce: h.u8[pierce + r] });
+      FIRE.source = h.u8[source + r];
+      FIRE.x = i32[x + r];
+      FIRE.y = i32[y + r];
+      FIRE.range = i32[range + r];
+      FIRE.damage = i32[dmg + r];
+      FIRE.speed = h.u16[speed + r];
+      FIRE.life = h.u16[life + r];
+      FIRE.pierce = h.u8[pierce + r];
+      swarm.fire(FIRE);
     }
   }
 }

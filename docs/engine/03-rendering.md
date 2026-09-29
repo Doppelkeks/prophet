@@ -68,7 +68,7 @@ A render graph declares the GPU passes and the resources they touch, and compile
 4. Compute transient lifetimes, and alias textures from a pool keyed by descriptor. The G-buffer and the bloom chain can then share memory.
 5. Create the bind groups and render-pass descriptors, once.
 
-**Run.** Every frame: one `GPUCommandEncoder`, every pass's `execute` in order, one `queue.submit`. The only per-frame patch is the canvas texture view (WebGPU hands out a new one each frame), written into the cached descriptor.
+**Run.** Every frame: one `GPUCommandEncoder`, every pass's `execute` in order, one `queue.submit`. The only per-frame patch is the canvas texture view (WebGPU hands out a new one each frame), written into the cached descriptor. The v0 renderer (`engine/render/renderer.js`) already works this way: it builds its scene pass (with the internal target's views) on resize, and patches the canvas view into its upscale pass each frame.
 
 ```mermaid
 flowchart TD
@@ -400,6 +400,13 @@ export class ReadbackRing {
 The `mapAsync` promise and the `getMappedRange()` buffer are the only per-frame allocations here, and the WebGPU API forces them.
 
 The implementation is `engine/gpu/readback-ring.js`. By default it has `max(6, K + 2)` slots; spare slots absorb latency spikes before the sim has to stall. It samples the submit → harvest latency, and the HUD shows the p95. A rejected `mapAsync` (device loss) is recorded, and the device-loss path owns recovery.
+
+**What harvest copies (M2).**
+- The ring hands the consumer the **mapped range itself** and unmaps it right after. Slots keep their tick lists and bound map callbacks.
+- The swarm (`engine/swarm/block-ring.js`) copies each tick's block out of that range into a **pooled block**. It copies the words before the event records, plus only the records present.
+- A block from `take(tick)` stays valid until the next `take`, which returns it to the pool.
+
+Before this, harvest copied the whole slot every frame: K blocks of ~140 KB at `high` caps, mostly the empty event area. That was ~33 MB/s of `ArrayBuffer` garbage at 60 fps, which drove minor and major GCs on the engine worker. The soak run measures the result ([10](10-tooling-testing.md#testing-strategy)).
 
 ## Device loss
 
