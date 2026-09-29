@@ -9,6 +9,11 @@ export const HUD = new StateSchema({
   patchY: 'i32', // Q10 m
   hp: 'i32', // Q8
   scrap: 'u32',
+  energy: 'u32', // Overclock meter, 0..100
+  overclock: 'u32', // ticks of Overclock left
+  stompCd: 'u32', // ticks until the stomp is ready
+  elites: 'u32', // Brutes killed (UNIT_DIED events)
+  taints: 'u32', // swarm blocks with lost events (the run no longer replays exactly)
   hpMax: 'i32', // Q8
   kills: 'u32',
   alive: 'u32', // swarm units alive (reported at T − K)

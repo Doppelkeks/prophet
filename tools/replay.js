@@ -17,6 +17,7 @@ try {
   const t0 = performance.now();
   const r = await Replay.run(SCRAPWAKE, doc);
   const ms = Math.round(performance.now() - t0);
+  if (r.tainted) console.warn('warning: the run lost swarm events (overflow); it cannot replay exactly');
   if (r.mismatch) {
     const hex = (/** @type {number | undefined} */ h) => (h === undefined ? 'none' : (h >>> 0).toString(16).padStart(8, '0'));
     console.error(`DIVERGED at tick ${r.mismatch.tick}: recorded ${hex(r.mismatch.expected)}, replayed ${hex(r.mismatch.actual)}`);

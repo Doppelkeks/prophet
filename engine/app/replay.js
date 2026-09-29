@@ -22,6 +22,7 @@ import { SimBoot } from './sim-boot.js';
  * @typedef {ReplayHeader & {
  *   version: number,
  *   ticks: number,
+ *   taints?: number,
  *   log: { version: number, ticks: number, words: number[], ui?: number[] },
  *   hashes: number[],
  * }} ReplayDocument `hashes` holds flat [tick, hash] pairs
@@ -36,14 +37,15 @@ export class Replay {
    * @returns {ReplayDocument}
    */
   static document(sim, header) {
-    return { version: Replay.VERSION, ...header, ticks: sim.tick, log: sim.log.toJSON(), hashes: sim.hashes.slice() };
+    return { version: Replay.VERSION, ...header, ticks: sim.tick, taints: sim.taints, log: sim.log.toJSON(), hashes: sim.hashes.slice() };
   }
 
   /**
-   * Plays a document back with the reference swarm and compares the hash streams.
+   * Plays a document back with the reference swarm and compares the hash streams. A run with lost events
+   * (`taints`) cannot be expected to match: its `tainted` flag says so.
    * @param {import('./game-module.js').GameModule} game
    * @param {ReplayDocument} doc
-   * @returns {Promise<{ ticks: number, hashes: number[], mismatch: { tick: number, expected: number, actual: number } | null }>}
+   * @returns {Promise<{ ticks: number, hashes: number[], tainted: boolean, mismatch: { tick: number, expected: number, actual: number } | null }>}
    */
   static async run(game, doc) {
     if (doc.version !== Replay.VERSION) throw new Error(`replay: unsupported version ${doc.version}`);
@@ -72,6 +74,6 @@ export class Replay {
       }
     }
     await boot.jobs.shutdown();
-    return { ticks: sim.tick, hashes: sim.hashes, mismatch };
+    return { ticks: sim.tick, hashes: sim.hashes, tainted: (doc.taints ?? 0) > 0 || sim.taints > 0, mismatch };
   }
 }

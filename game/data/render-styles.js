@@ -16,7 +16,7 @@ export const RENDER_STYLE = {
   units: [
     { w: 6, d: 5, h: 7, top: 'cyan-400', front: 'steel-700' },
     { w: 4, d: 3, h: 4, top: 'cyan-400', front: 'steel-500' },
-    { w: 10, d: 8, h: 12, top: 'holo-100', front: 'blue-500' },
+    { w: 10, d: 8, h: 12, top: 'holo-100', front: 'steel-500' },
   ],
   actors: [
     { w: 6, d: 4, h: 14, top: 'rust-700', front: 'rust-700' }, // PATCH: chassis
@@ -24,6 +24,7 @@ export const RENDER_STYLE = {
   ],
   shot: { w: 2, d: 1, h: 1, z: 8, top: 'sodium-500', front: 'amber-400' },
   pickup: { w: 2, d: 2, h: 2, z: 1, top: 'amber-400', front: 'rust-700' }, // scrap gems: amber (docs/game/03-art-audio.md#palette)
+  stunned: 'blue-500', // stunned units show an electric-blue top
   arenaHalf: ARENA_HALF / Units.q10(1),
   lift: 1,
 };

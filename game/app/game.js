@@ -3,10 +3,10 @@
 // No DOM, GPU or clock in here.
 import { Units } from '../../engine/core/units.js';
 import { ACTOR_WORDS } from '../../engine/render/render-style.js';
-import { Director, Gun, Health, Motion, Pilot, RunStats, Transform } from '../components/index.js';
+import { Abilities, Director, Gun, Health, Motion, Pilot, RunStats, Transform } from '../components/index.js';
 import { PATCH_SPEED } from '../data/arena.js';
 import { ACTOR_STYLE, RENDER_STYLE } from '../data/render-styles.js';
-import { SWARM_CAPS, SWARM_TYPES } from '../data/swarm-types.js';
+import { SWARM_CAPS, SWARM_STATUSES, SWARM_TYPES } from '../data/swarm-types.js';
 import { HUD } from '../state/hud-state.js';
 import { ARCHETYPES } from './archetypes.js';
 import { GAME_MANIFEST } from './manifest.js';
@@ -21,6 +21,7 @@ export const SCRAPWAKE = {
     K: 4, // docs/BUDGETS.md#simulation-constants
     seed: 0x5c4a9,
     types: SWARM_TYPES,
+    statuses: SWARM_STATUSES,
     caps: (profile) => SWARM_CAPS[profile] ?? SWARM_CAPS.std,
   },
   render: {
@@ -49,7 +50,7 @@ export const SCRAPWAKE = {
 
   setup(sim) {
     const world = sim.world;
-    if (world.archetype([Transform, Motion, Pilot, Health, Gun]) !== ARCHETYPES.pilot) throw new Error('archetype order changed');
+    if (world.archetype([Transform, Motion, Pilot, Health, Gun, Abilities]) !== ARCHETYPES.pilot) throw new Error('archetype order changed');
     if (world.archetype([RunStats, Director]) !== ARCHETYPES.run) throw new Error('archetype order changed');
     const patch = world.spawn(ARCHETYPES.pilot);
     world.set(patch, Pilot.speed, PATCH_SPEED);
@@ -73,6 +74,11 @@ export const SCRAPWAKE = {
     hud.set(I.hp, world.get(patch, Health.hp));
     hud.set(I.hpMax, world.get(patch, Health.max));
     hud.set(I.scrap, world.get(run, RunStats.scrap));
+    hud.set(I.energy, world.get(patch, Abilities.energy));
+    hud.set(I.overclock, world.get(patch, Abilities.overclock));
+    hud.set(I.stompCd, world.get(patch, Abilities.stompCd));
+    hud.set(I.elites, world.get(run, RunStats.elites));
+    hud.set(I.taints, sim.taints);
     hud.set(I.kills, world.get(run, RunStats.kills));
     hud.set(I.alive, world.get(run, RunStats.alive));
     hud.set(I.shots, world.get(run, RunStats.shots));

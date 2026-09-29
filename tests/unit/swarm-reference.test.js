@@ -2,7 +2,8 @@
 // hand-placed scenes, plus shuffle invariance and a golden hash.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ProxyFlag, Team } from '../../engine/swarm/swarm-contract.js';
+import { EffectShape, EventClass, EventKind, ProxyFlag, Status, SwarmOutbound, Team } from '../../engine/swarm/swarm-contract.js';
+import { EVENT_WORDS, OH, OUT_MAGIC, SwarmLayout } from '../../engine/swarm/swarm-layout.js';
 import { SwarmHarness, TEST_TYPES } from '../support/swarm-harness.js';
 
 const M = 1024; // one meter in Q10
@@ -232,21 +233,155 @@ test('a drop chance is a deterministic roll per tick and slot', () => {
   assert.equal(run(), n);
 });
 
+test('an area effect hits the units inside its circle or ring: damage, kill credit and a radial impulse', () => {
+  const h = new SwarmHarness();
+  h.unit(0, M, 0, 0, 5000);
+  h.unit(1, 0, 2560, 0, 5000);
+  h.unit(2, 4 * M, 0, 0, 5000);
+  h.unit(3, -M, 0, 0, 100);
+  const out = /** @type {SwarmOutbound} */ (h.step((i) => i.effect({ x: 0, y: 0, radius: 3 * M, damage: 300, impulse: 200, source: 7 })));
+  assert.deepEqual([h.hp(0), h.hp(1), h.hp(2)], [4700, 4700, 5000], 'inside the 3 m circle, not outside');
+  assert.equal(h.alive(3), false);
+  assert.equal(out.killsOfSource(7), 1, 'kill credit to the effect');
+  assert.deepEqual([h.vel(0), h.vel(1), h.vel(2)], [[200, 0], [0, 200], [0, 0]], 'pushed away from the center');
+  const r = new SwarmHarness();
+  r.unit(0, M, 0, 0, 5000);
+  r.unit(1, 2560, 0, 0, 5000);
+  r.step((i) => i.effect({ shape: EffectShape.RING, x: 0, y: 0, radius: 3 * M, inner: 2 * M, damage: 300 }));
+  assert.deepEqual([r.hp(0), r.hp(1)], [5000, 4700], 'a ring spares its inside');
+});
+
+test('knockback slides a unit and decays; heavy types take less, anchored ones none', () => {
+  const h = new SwarmHarness({}, { types: [TEST_TYPES[0], TEST_TYPES[2], { ...TEST_TYPES[0], knockback: 255 }] });
+  h.unit(0, 0, 0, 0);
+  h.unit(1, 0, 8 * M, 1);
+  h.unit(2, 0, -8 * M, 2);
+  h.step((i) => {
+    i.effect({ x: -M, y: 0, radius: 2 * M, impulse: 1000 });
+    i.effect({ x: -M, y: 8 * M, radius: 2 * M, impulse: 1000 });
+    i.effect({ x: -M, y: -8 * M, radius: 2 * M, impulse: 1000 });
+  });
+  assert.deepEqual(h.vel(0), [1000, 0]);
+  assert.deepEqual(h.vel(1), [250, 0], 'knockback resistance 192 keeps a quarter');
+  assert.deepEqual(h.vel(2), [0, 0], 'anchored');
+  for (let t = 0; t < 30; t++) h.step();
+  const [x] = h.pos(0);
+  assert.ok(x > 2800 && x < 3100, `slid ${x} (the velocity decays by a quarter per tick)`);
+  assert.deepEqual(h.vel(0), [0, 0]);
+  assert.deepEqual(h.pos(2), [0, -8 * M]);
+});
+
+test('statuses: tiers merge by OR, timers step every 4 ticks with damage per step, immunities block', () => {
+  const h = new SwarmHarness();
+  h.unit(0, 0, 0, 0, 5000);
+  h.unit(1, 0, 3 * M, 1, 5000); // the runner is immune to Stun
+  h.step((i) => {
+    i.effect({ x: 0, y: 0, radius: M, status: Status.BURNING, tier: 1 });
+    i.effect({ x: 0, y: 0, radius: M, status: Status.BURNING, tier: 3 });
+    i.effect({ x: 0, y: 3 * M, radius: M, status: Status.STUNNED, tier: 2 });
+    i.effect({ x: 0, y: 3 * M, radius: M, status: Status.SLOWED, tier: 2 });
+  });
+  assert.equal(h.timer(0, Status.BURNING), 6, 'tier 3 wins');
+  assert.equal(h.timer(1, Status.STUNNED), 0, 'immune');
+  assert.equal(h.timer(1, Status.SLOWED), 8);
+  while (h.tick <= 24) h.step();
+  assert.equal(h.timer(0, Status.BURNING), 0);
+  assert.equal(h.hp(0), 5000 - 6 * 64, 'six steps of burning');
+  for (let t = 0; t < 8; t++) h.step();
+  assert.equal(h.hp(0), 5000 - 6 * 64, 'and no more');
+});
+
+test('stunned units stop seeking and strike no one; slowed units move at half speed; marked ones take 25 % more', () => {
+  const h = new SwarmHarness();
+  h.unit(0, 6 * M, 0, 0, 5000);
+  h.unit(1, -6 * M, 0, 0, 5000);
+  h.unit(2, 0, 10 * M, 0, 5000);
+  h.unit(3, 0, -10 * M, 0, 5000);
+  const proxy = (/** @type {import('../../engine/swarm/swarm-contract.js').SwarmInbound} */ i) =>
+    i.proxy({ entity: 1, x: 0, y: 0, radius: 512, team: Team.PLAYER });
+  h.step((i) => {
+    proxy(i);
+    i.effect({ x: 6 * M, y: 0, radius: M, status: Status.STUNNED, tier: 3 });
+    i.effect({ x: 0, y: 10 * M, radius: M, status: Status.SLOWED, tier: 3 });
+  });
+  for (let t = 0; t < 20; t++) h.step(proxy);
+  // Tick 0 steered before its resolve applied the stun: the unit coasts to a stop within 0.1 m and holds.
+  assert.ok(6 * M - h.pos(0)[0] < 100, `stunned: stopped after ${6 * M - h.pos(0)[0]}`);
+  assert.deepEqual(h.vel(0), [0, 0]);
+  assert.ok(h.pos(1)[0] > -6 * M + 900, 'the other one chases');
+  const slow = 10 * M - h.pos(2)[1];
+  const fast = h.pos(3)[1] + 10 * M;
+  assert.ok(slow / fast > 0.4 && slow / fast < 0.6, `slowed ${slow} vs ${fast}`);
+
+  const c = new SwarmHarness();
+  c.unit(0, 0, 0, 0, 5000);
+  let damage = 0;
+  c.step((i) => {
+    proxy(i);
+    i.effect({ x: 0, y: 0, radius: M, status: Status.STUNNED, tier: 3 });
+  });
+  for (let t = 0; t < 25; t++) damage += c.step(proxy)?.proxyDamage(0) ?? 0;
+  assert.equal(damage, 0, 'a stunned unit on the proxy deals no contact damage');
+  for (let t = 0; t < 20; t++) damage += c.step(proxy)?.proxyDamage(0) ?? 0;
+  assert.ok(damage > 0, 'until the stun wears off');
+
+  const m = new SwarmHarness();
+  m.unit(0, 0, 0, 0, 5000);
+  m.step((i) => i.effect({ x: 0, y: 0, radius: M, status: Status.MARKED, tier: 1 }));
+  m.step((i) => i.effect({ x: 0, y: 0, radius: M, damage: 400 }));
+  assert.equal(m.hp(0), 5000 - 500);
+});
+
+test('report types emit UNIT_DIED events in canonical order; past the cap the class overflow bit is set', () => {
+  const h = new SwarmHarness();
+  for (const s of [9, 4, 6]) h.unit(s, s * M - 8 * M, 0, 2, 100);
+  const out = /** @type {SwarmOutbound} */ (h.step((i) => i.effect({ x: -M, y: 0, radius: 6 * M, damage: 500, source: 5 })));
+  assert.equal(out.events, 3);
+  assert.equal(out.eventOverflow, 0);
+  const slots = [];
+  for (let k = 0; k < out.events; k++) {
+    assert.equal(out.event(k, 0), EventKind.UNIT_DIED | (EventClass.GAMEPLAY << 8) | (2 << 16));
+    assert.equal(out.event(k, 2), 5, 'credited source');
+    slots.push(out.event(k, 1) & 0xffffff);
+  }
+  assert.deepEqual(slots, [4, 6, 9], 'sorted by record');
+  const x = (out.event(0, 3) << 16) >> 16;
+  assert.equal(x, (4 * M - 8 * M) >> 6, 'position in 1/16 m');
+
+  const small = new SwarmHarness({ events: 2 });
+  for (const s of [1, 2, 3]) small.unit(s, s * M, 0, 2, 100);
+  const o = /** @type {SwarmOutbound} */ (small.step((i) => i.effect({ x: 2 * M, y: 0, radius: 4 * M, damage: 500 })));
+  assert.equal(o.events, 2);
+  assert.equal(o.eventOverflow, EventClass.GAMEPLAY);
+
+  const layout = new SwarmLayout({ events: 4 });
+  const block = new Int32Array(layout.L.outWords);
+  block[OH.MAGIC] = OUT_MAGIC;
+  block[OH.EVENTS] = 3;
+  block.set([7, 0, 0, 0, -1, 0, 0, 0, 7, 0, 0, -5], layout.L.oEvents);
+  SwarmOutbound.canonicalize(layout, block);
+  assert.deepEqual(Array.from(block.subarray(layout.L.oEvents, layout.L.oEvents + 3 * EVENT_WORDS)), [7, 0, 0, 0, 7, 0, 0, -5, -1, 0, 0, 0], 'words compare unsigned');
+});
+
 /** A busy scene: rings of all types, a pushing player proxy that fires every tick. */
 function busy(/** @type {{ shuffle?: number }} */ o) {
   const h = new SwarmHarness({ units: 512, shots: 128 }, { seed: 777, shuffle: o.shuffle });
   const hashes = [];
   let scrap = 0;
+  let events = 0;
   for (let t = 0; t < 240; t++) {
     const out = h.step((i) => {
       if (t % 40 === 0) i.spawnRing({ type: (t / 40) % 3, count: 60, cx: 0, cy: 0, r0: 8 * M, r1: 12 * M });
       i.proxy({ entity: 1, x: 0, y: 0, radius: 512, team: Team.PLAYER, flags: ProxyFlag.PUSHES | ProxyFlag.COLLECTOR, aux: 4 * M });
+      if (t % 40 === 0) i.effect({ x: 0, y: 0, radius: 4 * M, impulse: 300, status: Status.STUNNED, tier: 1, source: 9 });
+      if (t % 40 === 20) i.effect({ shape: EffectShape.RING, x: 0, y: 0, radius: 8 * M, inner: 3 * M, damage: 50, status: Status.BURNING, tier: 2, source: 10 });
       i.fire({ source: t % 5, x: 0, y: 0, range: 10 * M, damage: 700, speed: 600, life: 30, pierce: t % 2 });
     });
     hashes.push(h.ref.hash(), ...Array.from(/** @type {any} */ (out).block));
     scrap += out?.scrapCollected ?? 0;
+    events += out?.events ?? 0;
   }
-  return { hashes, h, scrap };
+  return { hashes, h, scrap, events };
 }
 
 test('shuffled bin and shot orders give the same results, tick for tick', () => {
@@ -259,10 +394,11 @@ test('shuffled bin and shot orders give the same results, tick for tick', () => 
  * Golden hash of the busy scene after 240 ticks. It pins the reference kernels: a change here is a
  * change to the simulation, re-blessed on purpose (docs/engine/09-determinism-coop.md#replays-and-hashes).
  */
-const GOLDEN_BUSY = 0x9153d617; // re-blessed for pickups (drops, magnet, collection) in the pass chain
+const GOLDEN_BUSY = 0x079d4807; // re-blessed for area effects, statuses and events in the busy scene
 
 test('the busy scene matches its golden hash', () => {
-  const { h, scrap } = busy({});
+  const { h, scrap, events } = busy({});
   assert.ok(scrap > 0, 'the scene drops and collects scrap, so the hash covers pickups');
+  assert.ok(events > 0, 'brutes die and report, under stun and burning effects');
   assert.equal(h.ref.hash(), GOLDEN_BUSY, `got 0x${h.ref.hash().toString(16)}`);
 });

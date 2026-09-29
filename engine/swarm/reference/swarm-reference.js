@@ -6,12 +6,13 @@
 import { Hash32 } from '../../core/hash32.js';
 import { Rng } from '../../core/rng.js';
 import { IH, MISC } from '../swarm-layout.js';
-import { SwarmKeys } from '../swarm-contract.js';
+import { SwarmKeys, SwarmOutbound } from '../swarm-contract.js';
 import { BinCount } from './bin-count.js';
 import { BinScan } from './bin-scan.js';
 import { BinScatter } from './bin-scatter.js';
 import { ClearPass } from './clear-pass.js';
 import { Contact } from './contact.js';
+import { Effects } from './effects.js';
 import { Finalize } from './finalize.js';
 import { FreeScan } from './free-scan.js';
 import { Integrate } from './integrate.js';
@@ -28,7 +29,7 @@ import { UnitSpawn } from './unit-spawn.js';
 /** The pass chain, in order. */
 export const PASSES = /** @type {const} */ ([
   'clear', 'freeScan', 'shotSpawn', 'pickupSpawn', 'unitSpawn', 'binCount', 'binScan', 'binScatter',
-  'steer', 'integrate', 'projectiles', 'resolve', 'contact', 'targeting', 'pickups', 'finalize',
+  'steer', 'integrate', 'projectiles', 'effects', 'resolve', 'contact', 'targeting', 'pickups', 'finalize',
 ]);
 
 /** A small xorshift for shuffle mode (test-only randomness, never part of the simulation). */
@@ -85,6 +86,7 @@ export class SwarmReference {
       groups: inbound[IH.GROUPS],
       fires: inbound[IH.FIRES],
       proxies: inbound[IH.PROXIES],
+      effects: inbound[IH.EFFECTS],
       requests: inbound[IH.REQUESTS],
       flags: inbound[IH.FLAGS],
     };
@@ -92,7 +94,7 @@ export class SwarmReference {
     this.clock++;
     const due = Math.max(this.lastDue, this.clock + this.delay(tick));
     this.lastDue = due;
-    this.inFlight.push({ tick, block: b.O.slice(), due });
+    this.inFlight.push({ tick, block: SwarmOutbound.canonicalize(this.layout, b.O.slice()), due });
     this.#deliver();
   }
 
@@ -122,6 +124,8 @@ export class SwarmReference {
     after?.('integrate', b);
     Projectiles.run(b, this.shuffle);
     after?.('projectiles', b);
+    Effects.run(b, p);
+    after?.('effects', b);
     Resolve.run(b, p);
     after?.('resolve', b);
     Contact.run(b, p);

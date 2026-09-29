@@ -16,7 +16,7 @@ const SHOT_STYLE = 32;
 const PICKUP_STYLE = 33;
 const STYLE_COUNT = 36; // a multiple of 4 keeps the uniform's size simple
 const PALETTE_SIZE = 32;
-const FRAME_WORDS = 28;
+const FRAME_WORDS = 32;
 /** Depth range in internal px (y − z) mapped onto [0, 1] around the camera: ±256 m. */
 const DEPTH_RANGE = 4096;
 const COLOR_FORMAT = 'rgba8unorm';
@@ -93,6 +93,7 @@ export class Renderer {
     style.actors.forEach((b, i) => box(ACTOR_STYLES + i, b));
     box(SHOT_STYLE, style.shot);
     box(PICKUP_STYLE, style.pickup);
+    this.stunColor = color(style.stunned);
     const g = style.ground;
     this.groundColors = color(g.a) | (color(g.b) << 8) | (color(g.edge) << 16) | (color(g.outside) << 24);
 
@@ -335,6 +336,8 @@ export class Renderer {
     u[25] = L ? L.kPosY : 0;
     u[26] = L ? L.kInfo : 0;
     u[27] = L ? L.pickCap : 0;
+    u[28] = L ? L.uSt0 : 0;
+    u[29] = this.stunColor;
     q.writeBuffer(this.frameBuffer, 0, this.frameWords);
     if (actors) q.writeBuffer(this.actorBuffer, 0, this.actors, 0, actors * ACTOR_WORDS);
     const [ox, oy] = camera.offset(vp.k);

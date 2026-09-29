@@ -6,7 +6,7 @@
 import { ReadbackRing } from '../gpu/readback-ring.js';
 import { PipelineCache } from '../gpu/pipeline-cache.js';
 import { WgslPreprocessor } from '../gpu/wgsl-preprocessor.js';
-import { ProxyFlag, SwarmKeys, Team } from './swarm-contract.js';
+import { EffectShape, EventClass, EventKind, MAX_IMPULSE, ProxyFlag, SwarmKeys, SwarmOutbound, Team, UnitFlag } from './swarm-contract.js';
 import { IH, LAYOUT_FIELDS, SwarmLayout } from './swarm-layout.js';
 import { CARRY_OFFSET } from './reference/pickup-spawn.js';
 import { MAGNET_SPEED, PICKUP_RADIUS } from './reference/pickups.js';
@@ -17,7 +17,7 @@ import { Rng } from '../core/rng.js';
 
 const KERNELS = '/engine/swarm/kernels/';
 const PARAMS_STRIDE = 256; // minUniformBufferOffsetAlignment
-const PARAM_WORDS = 8;
+const PARAM_WORDS = 12;
 
 /** @typedef {import('./reference/swarm-buffers.js').TickParams} TickParams */
 
@@ -122,6 +122,11 @@ export class Swarm {
         PROXY_PUSHES: ProxyFlag.PUSHES,
         PROXY_COLLECTOR: ProxyFlag.COLLECTOR,
         PLAYER_TEAM: Team.PLAYER,
+        EFFECT_RING: EffectShape.RING,
+        EVENT_UNIT_DIED: EventKind.UNIT_DIED,
+        EVENT_CLASS_GAMEPLAY: EventClass.GAMEPLAY,
+        UNIT_REPORT: UnitFlag.REPORT,
+        MAX_IMPULSE,
       });
     const code = async (/** @type {string} */ name) => header + (await pre.process(`${KERNELS}${name}.wgsl`));
     const WG = this.wg;
@@ -136,6 +141,7 @@ export class Swarm {
       ['steer', 'steer', 'main', { WG }],
       ['integrate', 'integrate', 'main', { WG }],
       ['projectiles', 'projectiles', 'main', { WG }],
+      ['effects', 'effects', 'main', { WG }],
       ['resolve', 'resolve', 'main', { WG }],
       ['contact', 'contact', 'main', { WG }],
       ['targeting', 'targeting', 'main', { WG }],
@@ -190,7 +196,9 @@ export class Swarm {
   /** Collects the blocks of every harvested slot (call at frame start). */
   harvest() {
     return this.readback.harvest((slot, data) => {
-      for (let k = 0; k < slot.ticks.length; k++) this.arrived.set(slot.ticks[k], new Int32Array(data, k * this.outBytes, this.outBytes >> 2));
+      for (let k = 0; k < slot.ticks.length; k++) {
+        this.arrived.set(slot.ticks[k], SwarmOutbound.canonicalize(this.layout, new Int32Array(data, k * this.outBytes, this.outBytes >> 2)));
+      }
     });
   }
 
@@ -211,6 +219,7 @@ export class Swarm {
       groups: inbound[IH.GROUPS],
       fires: inbound[IH.FIRES],
       proxies: inbound[IH.PROXIES],
+      effects: inbound[IH.EFFECTS],
       requests: inbound[IH.REQUESTS],
       flags: inbound[IH.FLAGS],
     };
@@ -229,6 +238,7 @@ export class Swarm {
     w[5] = p.proxies;
     w[6] = p.requests;
     w[7] = p.flags;
+    w[8] = p.effects;
     q.writeBuffer(this.buffers.TP, k * PARAMS_STRIDE, w);
   }
 
@@ -277,6 +287,7 @@ export class Swarm {
       steer: () => run('steer', groups(L.unitCap)),
       integrate: () => run('integrate', groups(L.unitCap)),
       projectiles: () => run('projectiles', groups(L.shotCap)),
+      effects: () => run('effects', p.effects), // one workgroup per effect
       resolve: () => run('resolve', groups(L.unitCap)),
       contact: () => run('contact', p.proxies),
       targeting: () => run('targeting', p.fires),

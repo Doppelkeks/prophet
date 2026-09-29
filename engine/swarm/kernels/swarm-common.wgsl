@@ -14,6 +14,10 @@ struct TickParams {
   proxies: u32,
   requests: u32,
   flags: u32,
+  effects: u32,
+  pad0: u32,
+  pad1: u32,
+  pad2: u32,
 }
 
 @group(0) @binding(0) var<uniform> L: Layout;

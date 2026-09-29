@@ -1,7 +1,9 @@
 // @ts-check
 // Pass 8: steering. Seek toward proxy 0, separation from the 3×3 bin neighbourhood, soft push from
 // pushing proxies. Writes only the unit's own velocity; every term is an order-independent integer sum
-// (docs/engine/05-gpu-swarm.md#pass-chain). Twin: kernels/steer.wgsl.
+// (docs/engine/05-gpu-swarm.md#pass-chain). Slowed units steer at half speed; stunned ones don't seek.
+// Knockback above the speed limit is not clipped: it decays through the velocity smoothing.
+// Twin: kernels/steer.wgsl.
 import { Fixed } from '../../core/fixed.js';
 import { PROXY_WORDS, TY, TYPE_WORDS, UNIT_ALIVE } from '../swarm-layout.js';
 import { ProxyFlag } from '../swarm-contract.js';
@@ -28,7 +30,9 @@ export class Steer {
       const x = b.Ui[L.uPosX + i];
       const y = b.Ui[L.uPosY + i];
       const type = L.tTypes + (info & 0xff) * TYPE_WORDS;
-      const spd = b.T[type + TY.SPEED];
+      const st0 = b.U[L.uSt0 + i];
+      const stunned = (st0 >>> 24) !== 0; // status 3
+      const spd = ((st0 >>> 16) & 0xff) !== 0 ? b.T[type + TY.SPEED] >> 1 : b.T[type + TY.SPEED]; // status 2: slowed
       const ri = b.T[type + TY.RADIUS];
       const cx = SwarmMath.cellX(L, x);
       const cy = SwarmMath.cellY(L, y);
@@ -89,7 +93,7 @@ export class Steer {
         const q = proxies + k * PROXY_WORDS;
         const qx = b.I[q + 1];
         const qy = b.I[q + 2];
-        if (k === 0) SwarmMath.scaleTo(qx - x, qy - y, spd, seek);
+        if (k === 0 && !stunned) SwarmMath.scaleTo(qx - x, qy - y, spd, seek);
         if (((b.I[q + 4] >>> 16) & ProxyFlag.PUSHES) === 0) continue;
         const r = b.I[q + 3] + ri;
         const dx = x - qx;
@@ -100,9 +104,13 @@ export class Steer {
       }
       const v = b.U[L.uVel + i];
       const lim = spd + spd;
-      const vx = SwarmMath.approach(SwarmMath.lo16(v), seek[0]) + Fixed.clamp(sx >> SEP_SHIFT, -spd, spd) + Fixed.clamp(px >> PUSH_SHIFT, -lim, lim);
-      const vy = SwarmMath.approach(SwarmMath.hi16(v), seek[1]) + Fixed.clamp(sy >> SEP_SHIFT, -spd, spd) + Fixed.clamp(py >> PUSH_SHIFT, -lim, lim);
-      b.U[L.uVel + i] = SwarmMath.packVel(Fixed.clamp(vx, -lim, lim), Fixed.clamp(vy, -lim, lim));
+      const ax = SwarmMath.approach(SwarmMath.lo16(v), seek[0]);
+      const ay = SwarmMath.approach(SwarmMath.hi16(v), seek[1]);
+      const vx = ax + Fixed.clamp(sx >> SEP_SHIFT, -spd, spd) + Fixed.clamp(px >> PUSH_SHIFT, -lim, lim);
+      const vy = ay + Fixed.clamp(sy >> SEP_SHIFT, -spd, spd) + Fixed.clamp(py >> PUSH_SHIFT, -lim, lim);
+      const limX = ax > lim ? ax : -ax > lim ? -ax : lim; // a knockback still decaying may exceed the limit
+      const limY = ay > lim ? ay : -ay > lim ? -ay : lim;
+      b.U[L.uVel + i] = SwarmMath.packVel(Fixed.clamp(vx, -limX, limX), Fixed.clamp(vy, -limY, limY));
     }
   }
 }

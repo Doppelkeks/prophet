@@ -6,9 +6,9 @@ import '/engine/core/dev-global.js';
 import { GpuDevice } from '/engine/gpu/gpu-device.js';
 import { Swarm } from '/engine/swarm/swarm.js';
 import { SwarmLayout } from '/engine/swarm/swarm-layout.js';
-import { ProxyFlag, SwarmInbound, SwarmOutbound, SwarmTables, Team } from '/engine/swarm/swarm-contract.js';
+import { EffectShape, ProxyFlag, Status, SwarmInbound, SwarmOutbound, SwarmTables, Team } from '/engine/swarm/swarm-contract.js';
 import { PASSES, SwarmReference } from '/engine/swarm/reference/swarm-reference.js';
-import { TEST_TYPES } from '/tests/support/swarm-harness.js';
+import { TEST_STATUSES, TEST_TYPES } from '/tests/support/swarm-harness.js';
 
 const M = 1024;
 /** @type {GpuDevice | null} */
@@ -28,6 +28,13 @@ const SCENES = {
     i.proxy({ entity: 1, x: px, y: py, radius: 512, team: Team.PLAYER, flags: ProxyFlag.PUSHES | ProxyFlag.TARGETABLE | ProxyFlag.COLLECTOR, aux: 5 * M });
     i.proxy({ entity: 2, x: -px, y: 3 * M, radius: 700, team: Team.PLAYER, flags: ProxyFlag.COLLECTOR, aux: 3 * M });
     if (t === 150) i.depositScrap(9);
+    // Area effects: a stunning knockback circle, a burning ring, marking and slowing circles.
+    if (t % 30 === 0) i.effect({ x: px, y: py, radius: 5 * M, impulse: 400, damage: 100, status: Status.STUNNED, tier: 1 + ((t / 30) % 3), source: 20 });
+    if (t % 30 === 10) i.effect({ shape: EffectShape.RING, x: 0, y: 0, radius: 12 * M, inner: 6 * M, damage: 60, status: Status.BURNING, tier: 2, source: 21 });
+    if (t % 30 === 20) {
+      i.effect({ x: -px, y: 3 * M, radius: 4 * M, status: Status.MARKED, tier: 1 });
+      i.effect({ x: 5 * M, y: -5 * M, radius: 3 * M, impulse: -200, status: Status.SLOWED, tier: 3 });
+    }
     for (let f = 0; f < 12; f++) {
       i.fire({ source: f, x: px + (f - 6) * 300, y: py, range: (8 + (f % 6)) * M, damage: 300 + f * 50, speed: 500 + f * 20, life: 40, pierce: f % 3 });
     }
@@ -38,6 +45,10 @@ const SCENES = {
       for (let g = 0; g < 50; g++) i.spawnRing({ type: g % 3, count: 2000, cx: ((g % 10) - 5) * 10 * M, cy: (Math.floor(g / 10) - 2) * 10 * M, r0: 0, r1: 8 * M });
     }
     i.proxy({ entity: 1, x: 0, y: 0, radius: 512, team: Team.PLAYER, flags: ProxyFlag.PUSHES | ProxyFlag.COLLECTOR, aux: 6 * M });
+    // Non-lethal effects over most of the crowd: the 100k pools stay full while every unit takes hits.
+    if (t % 2 === 1) {
+      for (let e = 0; e < 16; e++) i.effect({ x: ((e % 4) - 2) * 20 * M, y: (Math.floor(e / 4) - 2) * 20 * M, radius: 10 * M, damage: 60, impulse: 200, status: Status.STUNNED, tier: 2, source: e });
+    }
     for (let f = 0; f < 64; f++) i.fire({ source: f, x: (f - 32) * M, y: 0, range: 12 * M, damage: 400, speed: 600, life: 30, pierce: 1 });
   },
 };
@@ -71,7 +82,8 @@ function compare(g, r, layout) {
     const at = k < L.kPosX ? field(shotFields, c.shots, k) : field(pickFields, c.pickups, k - L.kPosX);
     return { buffer: 'P', at, gpu: g.P[k], ref: r.P[k] };
   }
-  k = firstDiff(g.O, r.O, 0, layout.words.O);
+  // Event records land in GPU-race order: compare them as sorted multisets, like the blocks the sim takes.
+  k = firstDiff(SwarmOutbound.canonicalize(layout, g.O.slice()), SwarmOutbound.canonicalize(layout, r.O.slice()), 0, layout.words.O);
   if (k >= 0) return { buffer: 'O', at: `O[${k}]`, gpu: g.O[k], ref: r.O[k] };
   const ranges = [
     ['accumulators', L.aDmg, L.aDmg + 5 * c.units],
@@ -107,7 +119,7 @@ async function runSwarm(cfg) {
   const errors = [];
   device.addEventListener('uncapturederror', (e) => errors.push(/** @type {GPUUncapturedErrorEvent} */ (e).error.message));
   const layout = new SwarmLayout(cfg.caps);
-  const tables = SwarmTables.build(layout, TEST_TYPES);
+  const tables = SwarmTables.build(layout, TEST_TYPES, TEST_STATUSES);
   const t0 = performance.now();
   const swarm = await Swarm.create(device, layout, tables, cfg.seed, { wg: cfg.wg });
   const compileMs = performance.now() - t0;
@@ -123,6 +135,7 @@ async function runSwarm(cfg) {
   let scrapDropped = 0;
   let scrapCollected = 0;
   let maxCarry = 0;
+  let events = 0;
   let gpuMs = 0;
   let refMs = 0;
   /** @type {Map<number, Int32Array>} reference outbound blocks waiting for their GPU twin */
@@ -149,6 +162,7 @@ async function runSwarm(cfg) {
     scrapDropped += out.scrapDropped;
     scrapCollected += out.scrapCollected;
     maxCarry = Math.max(maxCarry, out.scrapCarry);
+    events += out.events;
     if (errors.length) return { ok: false, tick: t, errors };
     if (g) {
       const diff = compare(g, refState(ref), layout);
@@ -169,7 +183,7 @@ async function runSwarm(cfg) {
   }
   swarm.destroy();
   if (refBlocks.size || blockMismatches.count) return { ok: false, missingBlocks: refBlocks.size, blockMismatches };
-  return { ok: true, ticks: cfg.ticks, kills, maxAlive, scrapDropped, scrapCollected, maxCarry, hash: ref.hash(), compileMs, gpuMs, refMs, errors };
+  return { ok: true, ticks: cfg.ticks, kills, maxAlive, scrapDropped, scrapCollected, maxCarry, events, hash: ref.hash(), compileMs, gpuMs, refMs, errors };
 }
 
 /**
@@ -231,7 +245,7 @@ async function diagnose(swarm, ref, layout, prevGpu, prevRef, t, block, prevFire
 async function runReadback(cfg) {
   gpu ??= await GpuDevice.create();
   const layout = new SwarmLayout({ units: 1024, shots: 256, fires: 32, groups: 8, proxies: 4, gridW: 64, arenaHalf: 64 * M });
-  const tables = SwarmTables.build(layout, TEST_TYPES);
+  const tables = SwarmTables.build(layout, TEST_TYPES, TEST_STATUSES);
   const swarm = await Swarm.create(gpu.device, layout, tables, cfg.seed, { readbackSlots: 3 });
   const ref = new SwarmReference(layout, tables, { seed: cfg.seed });
   const inbound = new SwarmInbound(layout);

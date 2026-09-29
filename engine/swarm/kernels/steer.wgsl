@@ -1,5 +1,6 @@
 // Pass 8: seek toward proxy 0, separation from the 3×3 bins, soft push from pushing proxies. Writes only
-// the unit's own velocity. Twin: engine/swarm/reference/steer.js.
+// the unit's own velocity. Slowed units steer at half speed, stunned ones don't seek, and knockback above
+// the limit decays instead of being clipped. Twin: engine/swarm/reference/steer.js.
 #include "swarm-common.wgsl"
 
 @compute @workgroup_size(WG)
@@ -10,7 +11,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if ((info & UNIT_ALIVE) == 0u) { return; }
   let x = bitcast<i32>(U[L.uPosX + i]);
   let y = bitcast<i32>(U[L.uPosY + i]);
-  let spd = typeWord(info, TY_SPEED);
+  let st0 = U[L.uSt0 + i];
+  let stunned = (st0 >> 24u) != 0u;
+  var spd = typeWord(info, TY_SPEED);
+  if (((st0 >> 16u) & 0xffu) != 0u) { spd = spd >> 1u; }
   let ri = typeWord(info, TY_RADIUS);
   let W = i32(L.gridW);
   let pairCap = i32(L.pairCap);
@@ -77,7 +81,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let q = proxies + k * PROXY_WORDS;
     let qx = I[q + 1u];
     let qy = I[q + 2u];
-    if (k == 0u) { seek = scaleTo(qx - x, qy - y, spd); }
+    if (k == 0u && !stunned) { seek = scaleTo(qx - x, qy - y, spd); }
     if (((bitcast<u32>(I[q + 4u]) >> 16u) & PROXY_PUSHES) == 0u) { continue; }
     let r = I[q + 3u] + ri;
     let dx = x - qx;
@@ -88,7 +92,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   let v = U[L.uVel + i];
   let lim = spd + spd;
-  let vx = approach(lo16(v), seek.x) + clamp(sx >> SEP_SHIFT, -spd, spd) + clamp(px >> PUSH_SHIFT, -lim, lim);
-  let vy = approach(hi16(v), seek.y) + clamp(sy >> SEP_SHIFT, -spd, spd) + clamp(py >> PUSH_SHIFT, -lim, lim);
-  U[L.uVel + i] = packVel(clamp(vx, -lim, lim), clamp(vy, -lim, lim));
+  let ax = approach(lo16(v), seek.x);
+  let ay = approach(hi16(v), seek.y);
+  let vx = ax + clamp(sx >> SEP_SHIFT, -spd, spd) + clamp(px >> PUSH_SHIFT, -lim, lim);
+  let vy = ay + clamp(sy >> SEP_SHIFT, -spd, spd) + clamp(py >> PUSH_SHIFT, -lim, lim);
+  let limX = max(lim, abs(ax));
+  let limY = max(lim, abs(ay));
+  U[L.uVel + i] = packVel(clamp(vx, -limX, limX), clamp(vy, -limY, limY));
 }

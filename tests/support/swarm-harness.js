@@ -1,26 +1,42 @@
 // @ts-check
 // Helpers for swarm tests: a reference swarm with a small layout, direct placement of units and shots
 // for precise scenes, and a tick driver that tracks the previous tick's fire count.
-import { SwarmInbound, SwarmOutbound, SwarmTables } from '../../engine/swarm/swarm-contract.js';
+import { Status, SwarmInbound, SwarmOutbound, SwarmTables, UnitFlag } from '../../engine/swarm/swarm-contract.js';
 import { NO_HIT, PICK_ALIVE, SHOT_ALIVE, SwarmLayout, UNIT_ALIVE } from '../../engine/swarm/swarm-layout.js';
 import { SwarmReference } from '../../engine/swarm/reference/swarm-reference.js';
 import { SwarmMath } from '../../engine/swarm/reference/swarm-math.js';
 
-/** Test unit types: 0 grunt, 1 runner, 2 brute. Q10 m per tick, Q10 m, Q8 HP; drop chance Q16. */
+/**
+ * Test unit types: 0 grunt, 1 runner (immune to Stun), 2 brute (reports its death, resists knockback).
+ * Q10 m per tick, Q10 m, Q8 HP; drop chance Q16.
+ */
 export const TEST_TYPES = [
   { speed: 55, radius: 358, maxHp: 768, contact: 256, interval: 10, dropChance: 32768, dropValue: 1 },
-  { speed: 82, radius: 256, maxHp: 256, contact: 128, interval: 20 },
-  { speed: 34, radius: 614, maxHp: 3072, contact: 768, interval: 45, dropChance: 65536, dropValue: 5 },
+  { speed: 82, radius: 256, maxHp: 256, contact: 128, interval: 20, immune: 1 << Status.STUNNED },
+  { speed: 34, radius: 614, maxHp: 3072, contact: 768, interval: 45, dropChance: 65536, dropValue: 5, flags: UnitFlag.REPORT, knockback: 192 },
 ];
+
+/** Test status table: durations per tier in steps of 4 ticks, damage per step (Q8). */
+export const TEST_STATUSES = /** @type {import('../../engine/swarm/swarm-contract.js').StatusSpec[]} */ ([
+  { durations: [2, 4, 6], damage: 64 }, // burning
+  { durations: [2, 3, 4], damage: 32 }, // shocked
+  { durations: [4, 8, 12] }, // slowed
+  { durations: [3, 5, 8] }, // stunned
+  { durations: [4, 8, 12] }, // marked
+  { durations: [2, 4, 6], damage: 16 }, // corroded
+  { durations: [2, 2, 2] }, // magnetized
+  { durations: [2, 2, 2] }, // overheated
+]);
 
 export class SwarmHarness {
   /**
    * @param {Partial<import('../../engine/swarm/swarm-layout.js').SwarmCaps>} [caps]
-   * @param {{ seed?: number, shuffle?: number, delay?: (tick: number) => number, types?: import('../../engine/swarm/swarm-contract.js').UnitType[] }} [o]
+   * @param {{ seed?: number, shuffle?: number, delay?: (tick: number) => number, types?: import('../../engine/swarm/swarm-contract.js').UnitType[],
+   *   statuses?: import('../../engine/swarm/swarm-contract.js').StatusSpec[] }} [o]
    */
   constructor(caps = {}, o = {}) {
     this.layout = new SwarmLayout({ units: 256, shots: 64, pickups: 64, groups: 8, fires: 32, proxies: 4, gridW: 32, arenaHalf: 32 * 1024, ...caps });
-    this.tables = SwarmTables.build(this.layout, o.types ?? TEST_TYPES);
+    this.tables = SwarmTables.build(this.layout, o.types ?? TEST_TYPES, o.statuses ?? TEST_STATUSES);
     this.ref = new SwarmReference(this.layout, this.tables, { seed: o.seed ?? 1234, shuffle: o.shuffle, delay: o.delay });
     this.inbound = new SwarmInbound(this.layout);
     this.tick = 0;
@@ -83,6 +99,19 @@ export class SwarmHarness {
   /** @param {number} s */
   alive(s) {
     return (this.ref.b.U[this.ref.b.L.uInfo + s] & UNIT_ALIVE) !== 0;
+  }
+
+  /** Status timer (steps left) of unit `s`. @param {number} s @param {number} status */
+  timer(s, status) {
+    const b = this.ref.b;
+    const w = b.U[(status < 4 ? b.L.uSt0 : b.L.uSt1) + s];
+    return (w >>> ((status & 3) << 3)) & 0xff;
+  }
+
+  /** @param {number} s */
+  vel(s) {
+    const v = this.ref.b.U[this.ref.b.L.uVel + s];
+    return [SwarmMath.lo16(v), SwarmMath.hi16(v)];
   }
 
   /** @param {number} s */

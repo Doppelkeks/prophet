@@ -43,6 +43,7 @@ fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) n: u32) -> VOut {
     y = f32(bitcast<i32>(U[F.uPosY + n])) - hi16(vel) * back;
     z = 0.0;
     style = S.styles[UNIT_STYLES + min(info & 0xffu, 15u)];
+    if ((U[F.uSt0 + n] >> 24u) != 0u) { style.w = (style.w & ~0xffu) | F.stunColor; } // stunned: tinted top
   } else if (SOURCE == 1u) {
     let info = P[F.pInfo + n];
     if ((info & SHOT_ALIVE) == 0u) { return hidden(); }

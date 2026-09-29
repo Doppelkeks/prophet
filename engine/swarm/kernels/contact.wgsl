@@ -1,5 +1,5 @@
 // Pass 12: contact damage on player proxies, one workgroup per proxy; each unit strikes on its type's
-// cadence. The per-proxy sums commute. Twin: engine/swarm/reference/contact.js.
+// cadence, unless stunned. The per-proxy sums commute. Twin: engine/swarm/reference/contact.js.
 #define O_ATOMIC
 #include "swarm-common.wgsl"
 
@@ -42,6 +42,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
         let j = u32(A[L.aBinEntries + starts[n] + e]);
         let info = U[L.uInfo + j];
         if ((info & UNIT_ALIVE) == 0u) { continue; }
+        if ((U[L.uSt0 + j] >> 24u) != 0u) { continue; }
         let r = qr + typeWord(info, TY_RADIUS);
         let dx = bitcast<i32>(U[L.uPosX + j]) - qx;
         let dy = bitcast<i32>(U[L.uPosY + j]) - qy;

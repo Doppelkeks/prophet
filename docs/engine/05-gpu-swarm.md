@@ -264,15 +264,15 @@ The first implementation (M2) runs a subset of the chain, with the same determin
 | | Passes and features |
 |---|---|
 | **In v0** | Free-slot scan, shot spawn (projectiles), unit spawn, bins, steering, integrate, projectiles, resolve, contact, targeting (`nearest` only), outbound copy |
-| **Added in M2** | Pickups: drops, magnet, collection, the scrap carry ([below](#pickups-in-m2)) |
-| **Later** | Subgroup scans (v0 uses the workgroup-memory scan), area effects, statuses, events and flow fields; also the other target policies, chains, and the density and threat maps |
+| **Added in M2** | Pickups: drops, magnet, collection and the scrap carry ([below](#pickups-in-m2)). Area effects (circle and ring), statuses, knockback and events ([below](#effects-statuses-and-events-in-m2)). |
+| **Later** | Subgroup scans (v0 uses the workgroup-memory scan) and flow fields. Also: cone and capsule effects, enemy-team effects, Magnetized and Overheated behaviour, the other target policies, chains, and the density and threat maps. |
 
 - v0 dispatches over each pool's **capacity**. Indirect dispatch by high-water mark ([buffers](#buffers)) comes later.
 - Spawn groups already carry their CPU-computed request prefix ([slot allocation](#deterministic-slot-allocation)).
 
 **v0 implementation notes.** The layout lives in `engine/swarm/swarm-layout.js`, the contract in `swarm-contract.js`, and the reference in `engine/swarm/reference/`, one class per pass.
 - **Buffers.** v0 binds six storage buffers: `U` (units), `P` (shots), `A` (accumulators, bins, free lists, scan scratch, shot requests), `I` (a ring of inbound blocks, one per tick encoded in a frame), `O` (the outbound block) and `T` (sine and type tables). It also binds the `Layout` uniform of word offsets, generated from the same field list as the JS layout, and a per-tick parameter uniform. `G` arrives with flow fields. The bin grid is centered on the origin unless configured otherwise, and must cover the arena.
-- **Pass order.** Clear, free-slot scan, shot spawn, pickup spawn, unit spawn, bin count, bin scan, bin scatter, steer, integrate, projectiles, resolve, contact, targeting, pickups, finalize, then the copy of `O` into the readback slot.
+- **Pass order.** Clear, free-slot scan, shot spawn, pickup spawn, unit spawn, bin count, bin scan, bin scatter, steer, integrate, projectiles, area effects, resolve, contact, targeting, pickups, finalize, then the copy of `O` into the readback slot.
 - **Steering.** Every unit chases proxy 0 (there are no flow fields yet): the seek velocity is the direction to it, scaled to the type's speed by an integer length (`isqrt`, after halving both components until they fit 14 bits). The velocity moves a quarter of the way toward the seek velocity each tick and snaps to it within 4 units, so it settles exactly. Separation:
   - Pairwise linear repulsion runs against the members of 3×3 neighbour cells holding at most the pairwise cap. Coincident units split along x by slot order.
   - A denser cell acts as one neighbour at its centroid, weighted by the cap.
@@ -321,6 +321,27 @@ Scrap gems follow the determinism rules of the rest of the chain.
 - The fuller rule, folding the gems nearest PATCH together at the cap ([above](#pass-chain)), comes later.
 
 **After a swarm reset** the pools start empty. On the reset tick, SCRAPWAKE deposits the scrap it knew was outstanding (`scrapDropped − scrap` from the applied blocks), and it comes back as a merged gem near PATCH. Drops and pickups inside the discarded ticks are lost.
+
+### Effects, statuses and events in M2
+
+**Area effects** are 32 B inbound records:
+- `shape | team << 8 | status << 16 | tier << 24`, center x/y, radius, inner radius (for rings), damage (Q8), radial impulse (Q10 per tick; negative pulls inward), and the kill-credit source.
+- There are up to [256 per tick](../BUDGETS.md#entity-caps).
+- One workgroup per effect scans the bins under its bounding box. Every live unit inside the shape gets the damage, kill credit (`atomicMax`), the impulse and the status tier (`atomicOr` of the unary code). Circles and rings exist in M2; player-team effects hit the swarm.
+
+**Statuses** follow the [status rules](#status-effects), using a status table from game data (three tier durations and a damage per step per status, in `T`):
+- Every 4 ticks, resolve steps each running timer down and deals that status's damage per step. It then applies this tick's tiers.
+- Burning, Shocked and Corroded deal their damage per step.
+- Slowed halves the steering speed. Stunned drops the seek, and a stunned unit deals no contact damage.
+- Marked adds 25 % to hit damage.
+- The type table's `FLAGS` word carries the immunity mask in bits 8–15.
+- Magnetized and Overheated have timers, but their behaviour comes later.
+
+**Events.**
+- Types flagged `REPORT` emit a 16 B `UNIT_DIED` event (gameplay class) when they die: `kind | class << 8 | type << 16`, then slot and generation, the credited source, and the position in 1/16 m.
+- A kernel appends through an atomic cursor. Past the per-tick cap it sets its class's overflow bit instead.
+- Both backends sort the records of a block (`SwarmOutbound.canonicalize`, comparing words as unsigned) before the sim takes it. The GPU's race order therefore never reaches the simulation, and the equivalence tests compare the event region as a sorted multiset.
+- `SimCore` counts blocks with an overflow bit as **taints**. Replay documents carry the count, and `Replay.run` flags a tainted run instead of expecting it to match.
 
 ## CPU-GPU contract
 
@@ -427,7 +448,10 @@ Tuning (durations per tier, damage per step, multipliers) lives in game data ([c
 
 - **Timers** are `u8` counts of timer steps ([step size](../BUDGETS.md#simulation-constants)), packed four to a `u32`. Resolve decrements every nonzero timer once per step.
 - **Application is order-independent.** A hit or an area effect carries (status, tier), with tier 1–3. It ORs the status's 3-bit field in the unit's `stApply` accumulator with a unary code (`001`, `011`, `111`). The OR of unary codes is the highest tier, in any order. Resolve turns the tier into a duration from the status table and sets `timer = max(timer, duration)`, unless the type's immunity bitmask blocks that status.
-- **Knockback** is not a status. Hits and effects `atomicAdd` an impulse (Q10 per tick) into `impX` and `impY`. Resolve scales it by the type's knockback resistance and adds it to the velocity; stunned or anchored types ignore it.
+- **Knockback** is not a status. Hits and effects `atomicAdd` an impulse (Q10 per tick) into `impX` and `impY`.
+  - Resolve scales it by the type's knockback resistance (0–255; 255 is anchored and ignores it) and adds it to the velocity. It is capped at 4 m per tick.
+  - Steering does not clip a knockback above the speed limit. Velocity smoothing lets it decay by a quarter per tick, so an impulse becomes a slide of about four times its size.
+  - Stunned units slide too, then stop.
 
 ## Overflow policy
 

@@ -9,9 +9,11 @@
 //      then pickups, persistent SoA    posX posY value info
 //   A  scratch and atomics             per-unit accumulators, bins, free lists, scan scratch, shot requests,
 //                                      drop values and the drop list
-//   I  inbound ring                    `ticksInFlight` blocks: header, spawn groups, fire commands, proxies
-//   O  outbound block                  header, kills per type and source, proxy damage, fire-result bits
-//   T  tables                          sine table (Q14), type table
+//   I  inbound ring                    `ticksInFlight` blocks: header, spawn groups, fire commands, proxies,
+//                                      area effects
+//   O  outbound block                  header, kills per type and source, proxy damage and scrap, fire-result
+//                                      bits, events
+//   T  tables                          sine table (Q14), type table, status table
 
 import { SIN_TABLE_SIZE } from '../core/sin-table.js';
 
@@ -30,14 +32,20 @@ export const FIRE_WORDS = 8; // 32 B fire command
 export const PROXY_WORDS = 8; // 32 B actor proxy
 export const TYPE_WORDS = 8; // type-table entry
 export const REQ_WORDS = 8; // shot request, targeting (tick T) → shot spawn (tick T + 1)
+export const EFFECT_WORDS = 8; // 32 B area effect
+export const EVENT_WORDS = 4; // 16 B event
+export const STATUS_WORDS = 2; // status-table entry: tier durations, damage per step
+export const STATUS_COUNT = 8;
+/** Status timers count steps of this many ticks (docs/BUDGETS.md#simulation-constants). */
+export const STATUS_STEP = 4;
 export const HEADER_WORDS = 16;
 
 /** Inbound header words. */
-export const IH = Object.freeze({ TICK: 0, GROUPS: 1, FIRES: 2, PROXIES: 3, REQUESTS: 4, FLAGS: 5, SCRAP_IN: 6 });
+export const IH = Object.freeze({ TICK: 0, GROUPS: 1, FIRES: 2, PROXIES: 3, REQUESTS: 4, FLAGS: 5, SCRAP_IN: 6, EFFECTS: 7 });
 /** Outbound header words. */
 export const OH = Object.freeze({
   MAGIC: 0, TICK: 1, FLAGS: 2, UNITS_ALIVE: 3, SHOTS_ALIVE: 4, SPAWNS_REJECTED: 5, SHOTS_REJECTED: 6, KILLS: 7, FIRED: 8, CONTACT_HITS: 9,
-  SCRAP_DROPPED: 10, SCRAP_COLLECTED: 11, PICKUPS_ALIVE: 12, SCRAP_CARRY: 13,
+  SCRAP_DROPPED: 10, SCRAP_COLLECTED: 11, PICKUPS_ALIVE: 12, SCRAP_CARRY: 13, EVENTS: 14, EVENT_OVERFLOW: 15,
 });
 export const OUT_MAGIC = 0x53574f42; // 'SWOB'
 /** Type-table words. */
@@ -55,6 +63,8 @@ export const SCAN_BLOCK = 256;
  * @property {number} groups spawn groups per tick
  * @property {number} fires fire commands per tick
  * @property {number} proxies actor proxies per tick
+ * @property {number} effects area effects per tick
+ * @property {number} events GPU→CPU events per tick
  * @property {number} types type-table entries
  * @property {number} sources kill-credit sources
  * @property {number} gridW bins per side
@@ -77,6 +87,7 @@ export const LAYOUT_FIELDS = /** @type {const} */ ([
   'outWords', 'oKillsType', 'oKillsSource', 'oProxyDmg', 'oFireBits', 'typeCap', 'sourceCap', 'scanBlocks',
   'tSin', 'tTypes', 'keySpawnA', 'keySpawnR', 'keyPhase', 'aScanTmp', 'keyDrop', 'pickCap',
   'kPosX', 'kPosY', 'kValue', 'kInfo', 'aDrop', 'aDropReq', 'aPickFree', 'oProxyScrap',
+  'inEffects', 'effectCap', 'oEvents', 'eventCap', 'tStatus', 'pad1', 'pad2', 'pad3',
 ]);
 
 export class SwarmLayout {
@@ -88,6 +99,8 @@ export class SwarmLayout {
     groups: 64,
     fires: 256,
     proxies: 16,
+    effects: 64,
+    events: 256,
     types: 16,
     sources: 64,
     gridW: 128,
@@ -113,6 +126,7 @@ export class SwarmLayout {
     const scanBlocks = Math.ceil(scanElems / SCAN_BLOCK);
     if (scanBlocks > SCAN_BLOCK * 4) throw new Error('swarm: pools larger than the three-level scan supports');
     if (c.groups > 1024 || c.fires > 1024 || c.fires % 32 !== 0) throw new Error('swarm: fires must be a multiple of 32, at most 1024');
+    if (c.effects < 1 || c.effects > 65535 || c.events < 1) throw new Error('swarm: effect and event caps must be positive');
     if (c.units > 0xffffff || c.shots > 0xffffff || c.pickups > 0xffffff) throw new Error('swarm: pools must fit 24 bits');
     if (c.pickups < 1) throw new Error('swarm: the pickup pool needs at least one slot');
     const cells = c.gridW * c.gridW;
@@ -175,7 +189,9 @@ export class SwarmLayout {
     L.inGroups = HEADER_WORDS;
     L.inFires = L.inGroups + c.groups * GROUP_WORDS;
     L.inProxies = L.inFires + c.fires * FIRE_WORDS;
-    L.inWords = L.inProxies + c.proxies * PROXY_WORDS;
+    L.inEffects = L.inProxies + c.proxies * PROXY_WORDS;
+    L.inWords = L.inEffects + c.effects * EFFECT_WORDS;
+    L.effectCap = c.effects;
     L.groupCap = c.groups;
     L.fireCap = c.fires;
     L.proxyCap = c.proxies;
@@ -186,17 +202,21 @@ export class SwarmLayout {
     L.oProxyDmg = L.oKillsSource + c.sources;
     L.oProxyScrap = L.oProxyDmg + c.proxies;
     L.oFireBits = L.oProxyScrap + c.proxies;
-    L.outWords = L.oFireBits + (c.fires >>> 5);
+    L.oEvents = L.oFireBits + (c.fires >>> 5);
+    L.outWords = L.oEvents + c.events * EVENT_WORDS;
+    L.eventCap = c.events;
     L.typeCap = c.types;
     L.sourceCap = c.sources;
     L.scanBlocks = scanBlocks;
 
     L.tSin = 0;
     L.tTypes = SIN_TABLE_SIZE;
+    L.tStatus = SIN_TABLE_SIZE + c.types * TYPE_WORDS;
     L.keySpawnA = 0;
     L.keySpawnR = 0;
     L.keyPhase = 0;
     L.keyDrop = 0;
+    L.pad1 = L.pad2 = L.pad3 = 0;
 
     /** Word offsets and sizes by name. */
     this.L = L;
@@ -207,7 +227,7 @@ export class SwarmLayout {
       A: a,
       I: L.inWords * c.ticksInFlight,
       O: L.outWords,
-      T: SIN_TABLE_SIZE + c.types * TYPE_WORDS,
+      T: SIN_TABLE_SIZE + c.types * TYPE_WORDS + STATUS_COUNT * STATUS_WORDS,
     };
   }
 
@@ -245,6 +265,10 @@ export class SwarmLayout {
       ['PROXY_WORDS', PROXY_WORDS],
       ['TYPE_WORDS', TYPE_WORDS],
       ['REQ_WORDS', REQ_WORDS],
+      ['EFFECT_WORDS', EFFECT_WORDS],
+      ['EVENT_WORDS', EVENT_WORDS],
+      ['STATUS_WORDS', STATUS_WORDS],
+      ['STATUS_STEP', STATUS_STEP],
       ['SCAN_BLOCK', SCAN_BLOCK],
       ['OUT_MAGIC', OUT_MAGIC],
       ...Object.entries(IH).map(([k, v]) => /** @type {[string, number]} */ ([`IH_${k}`, v])),

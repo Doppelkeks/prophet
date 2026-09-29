@@ -67,6 +67,8 @@ export class SimCore {
     this.emptyUntil = 0;
     /** Swarm resets applied. */
     this.resets = 0;
+    /** Swarm blocks that lost events (an overflow bit): detail differs between machines, so the run is tainted. */
+    this.taints = 0;
     this.pendingReset = false;
     this.engineCmd = new Uint32Array(UI_WORDS);
     this.empty = new Int32Array(this.swarm ? this.swarm.backend.layout.L.outWords : 0);
@@ -159,6 +161,7 @@ export class SimCore {
         }
         const out = new SwarmOutbound(swarm.backend.layout, block);
         if (out.tick !== b) throw new Error(`sim: swarm block of tick ${out.tick} arrived for tick ${b}`);
+        if (out.eventOverflow !== 0) this.taints++;
         res.swarmOut = out;
       } else {
         res.swarmOut = null;

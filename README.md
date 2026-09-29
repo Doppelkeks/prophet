@@ -118,6 +118,8 @@ npm run replay -- f.json  # replay an exported run in Node on the JS reference s
 - Move PATCH with WASD, the arrow keys or a gamepad's d-pad and left stick. PATCH fires on its own.
 - Swarm rings spawn around PATCH and chase it.
 - Kills drop amber scrap gems. They fly to PATCH within 3 m, and the HUD counts the scrap.
+- Space stomps (Stomper Legs): a 3 m shockwave that damages, knocks back and stuns for 1 s (blue tops); 3 s cooldown.
+- Q starts Overclock when the CORE meter is full, which takes 10 s plus kills: a 6 m knockback pulse, then 5 s of +40 % fire rate and +20 % move speed.
 - `=` and `-` raise and lower the director's stress; `]` spawns a burst ring.
 - URL options:
   - `?units=&shots=&pickups=` override the swarm pools.

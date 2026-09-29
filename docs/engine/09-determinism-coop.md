@@ -313,7 +313,7 @@ Collision data is not asynchronous. The engine worker is the voxel authority and
 - **Today's format** (`engine/app/replay.js`, version 1) is JSON, without run-length encoding. It holds:
   - `build`: for now, the manifest hash.
   - `heapProfile`, the swarm `seed`, *K*, and the swarm's full caps (the sim profile).
-  - `hashEvery`, `ticks`, the command log, and the hash stream as flat `[tick, hash]` pairs.
+  - `hashEvery`, `ticks`, `taints` (swarm blocks that lost events to an overflow), the command log, and the hash stream as flat `[tick, hash]` pairs.
 
   The engine worker hashes every 60 ticks and exports a document on request (`window.__px.exportReplay()`). `Replay.run` plays it back headless with the JS reference swarm and reports the first divergent tick. `npm run replay -- file.json` wraps it for the command line.
 - A replay plays only on its own build. When the sim changes on purpose, the CI corpus is re-recorded, and re-blessing the golden hashes is a reviewed change.

@@ -1,5 +1,6 @@
 // @ts-check
 import { System } from '../../../engine/ecs/system.js';
+import { EventKind } from '../../../engine/swarm/swarm-contract.js';
 import { Health, RunStats } from '../../components/index.js';
 
 /**
@@ -41,5 +42,8 @@ export class SwarmFeedbackSystem extends System {
     cmd.set(run, RunStats.shots, out.shotsAlive);
     cmd.set(run, RunStats.scrap, reader.get(run, RunStats.scrap) + out.proxyScrap(0));
     cmd.set(run, RunStats.scrapDropped, reader.get(run, RunStats.scrapDropped) + out.scrapDropped);
+    let elites = reader.get(run, RunStats.elites);
+    for (let k = 0; k < out.events; k++) if ((out.event(k, 0) & 0xff) === EventKind.UNIT_DIED) elites++;
+    cmd.set(run, RunStats.elites, elites);
   }
 }

@@ -1,4 +1,5 @@
 // @ts-check
+export { Abilities } from './abilities.js';
 export { Gun } from './gun.js';
 export { Health } from './health.js';
 export { Motion } from './motion.js';

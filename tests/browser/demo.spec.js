@@ -44,6 +44,18 @@ test('scripted play on the GPU swarm replays identically in Node on the JS refer
   await until(page, (h) => h.stress === 2);
   // Stand still until the swarm reaches PATCH.
   await until(page, (h) => h.hp < h.hpMax || h.downs > 0, 90_000);
+  // Stomp: the units around PATCH are stunned, and their tops turn electric blue.
+  await page.keyboard.down('Space');
+  await until(page, (h) => h.stompCd > 0);
+  await page.keyboard.up('Space');
+  const stunned = await page.evaluate(async () => {
+    const c = await /** @type {NonNullable<typeof window.__px>} */ (window.__px).capture();
+    const blue = c.palette['blue-500'];
+    let n = 0;
+    for (let i = 0; i < c.data.length; i += 4) if (((c.data[i] << 16) | (c.data[i + 1] << 8) | c.data[i + 2]) === blue) n++;
+    return n;
+  });
+  expect(stunned).toBeGreaterThan(0);
   // A burst ring, then strafe a square.
   const alive = /** @type {number} */ (await page.evaluate(() => window.__px?.hud?.alive));
   await page.keyboard.press('BracketRight');

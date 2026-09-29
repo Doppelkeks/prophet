@@ -9,6 +9,7 @@ struct Frame {
   pPosX: u32, pPosY: u32, pVel: u32, pInfo: u32, // shot columns (words into P)
   unitCap: u32, shotCap: u32, actorCount: u32, groundColors: u32, // ground: a | b << 8 | edge << 16 | outside << 24
   kPosX: u32, kPosY: u32, kInfo: u32, pickCap: u32, // pickup columns (words into P)
+  uSt0: u32, stunColor: u32, pad0: u32, pad1: u32,  // status timers 0-3 (U); the palette index of stunned tops
 }
 
 struct Styles {

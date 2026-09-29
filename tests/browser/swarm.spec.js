@@ -26,6 +26,7 @@ for (const wg of [32, 64, 128]) {
     expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
     expect(r.kills).toBeGreaterThan(0);
     expect(r.scrapCollected).toBeGreaterThan(0); // drops, merged gems and magnets ran on both sides
+    expect(r.events).toBeGreaterThan(0); // effects killed report types: events matched as sorted records
     expect(r.errors).toEqual([]);
     expect(errors).toEqual([]);
   });

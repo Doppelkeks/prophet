@@ -14,6 +14,12 @@ export const hud = {
   hpRatio: new Signal(/** @type {number} */ (1), Signal.near(0.002)),
   hp: new Signal(0),
   scrap: new Signal(0),
+  /** Overclock meter 0..100; seconds of Overclock left (0.1 s); stomp readiness in seconds (0 = ready). */
+  energy: new Signal(0),
+  overclock: new Signal(0),
+  stomp: new Signal(0),
+  elites: new Signal(0),
+  taints: new Signal(0),
   kills: new Signal(0),
   alive: new Signal(0),
   shots: new Signal(0),
@@ -38,6 +44,11 @@ export function updateHud(r) {
   hud.hpRatio.value = Math.max(0, Math.min(1, r.get(I.hp) / max));
   hud.hp.value = Math.ceil(r.get(I.hp) / 256);
   hud.scrap.value = r.get(I.scrap);
+  hud.energy.value = r.get(I.energy);
+  hud.overclock.value = Math.round(r.get(I.overclock) / 6) / 10;
+  hud.stomp.value = Math.round(r.get(I.stompCd) / 6) / 10;
+  hud.elites.value = r.get(I.elites);
+  hud.taints.value = r.get(I.taints);
   hud.kills.value = r.get(I.kills);
   hud.alive.value = r.get(I.alive);
   hud.shots.value = r.get(I.shots);

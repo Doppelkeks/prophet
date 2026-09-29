@@ -10,6 +10,7 @@
  * @property {number} groups
  * @property {number} fires
  * @property {number} proxies
+ * @property {number} effects
  * @property {number} requests units requested by this tick's spawn groups
  * @property {number} flags bit 0: swarm reset
  */

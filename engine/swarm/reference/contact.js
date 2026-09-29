@@ -1,6 +1,7 @@
 // @ts-check
 // Pass 12: contact damage on player proxies from overlapping live units, each at its type's attack
-// cadence ((tick + anim phase) mod interval = 0). Per-proxy sums commute. Twin: kernels/contact.wgsl.
+// cadence ((tick + anim phase) mod interval = 0); stunned units don't strike. Per-proxy sums commute.
+// Twin: kernels/contact.wgsl.
 import { Fixed } from '../../core/fixed.js';
 import { OH, PROXY_WORDS, TY, TYPE_WORDS, UNIT_ALIVE } from '../swarm-layout.js';
 import { Team } from '../swarm-contract.js';
@@ -34,6 +35,7 @@ export class Contact {
             const j = b.A[start + e];
             const info = b.U[L.uInfo + j];
             if ((info & UNIT_ALIVE) === 0) continue;
+            if (b.U[L.uSt0 + j] >>> 24 !== 0) continue; // stunned
             const type = L.tTypes + (info & 0xff) * TYPE_WORDS;
             const r = qr + b.T[type + TY.RADIUS];
             const dx = b.Ui[L.uPosX + j] - qx;

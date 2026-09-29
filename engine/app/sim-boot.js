@@ -48,7 +48,7 @@ export class SimBoot {
     let swarm = null;
     if (gs && o.swarm) {
       const layout = new SwarmLayout({ ...gs.caps(o.swarmProfile ?? 'std'), ...o.swarmCaps });
-      swarm = { backend: await o.swarm(layout, SwarmTables.build(layout, gs.types), gs.seed), K: gs.K };
+      swarm = { backend: await o.swarm(layout, SwarmTables.build(layout, gs.types, gs.statuses), gs.seed), K: gs.K };
     }
     const sim = new SimCore({ world, scheduler, resources, log: o.log, hashEvery: o.hashEvery, swarm });
     o.game.setup(sim);

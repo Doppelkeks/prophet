@@ -47,6 +47,6 @@ test('palette: the renderer reads the tokens of game/ui/palette.css, and the dem
   assert.equal(tokens.get('sodium-500'), 0xff7a1a, 'PATCH orange');
   assert.equal(tokens.get('cyan-400'), 0x19e6ff, 'Sweep cyan');
   const s = RENDER_STYLE;
-  const used = [s.clear, s.ground.a, s.ground.b, s.ground.edge, s.ground.outside, ...[...s.units, ...s.actors, s.shot, s.pickup].flatMap((b) => [b.top, b.front])];
+  const used = [s.stunned, s.clear, s.ground.a, s.ground.b, s.ground.edge, s.ground.outside, ...[...s.units, ...s.actors, s.shot, s.pickup].flatMap((b) => [b.top, b.front])];
   for (const t of used) assert.ok(tokens.has(t), `--c-${t} is defined`);
 });

@@ -26,6 +26,8 @@ const CSS = `
 .enemy { color: var(--ui-enemy, #3de0ff); font-weight: 700; letter-spacing: 0.08em; }
 .dim { color: var(--ui-text-dim, #8da2c0); }
 .scrap { color: var(--ui-accent, #ffb23f); font-weight: 700; letter-spacing: 0.08em; }
+.danger { color: var(--ui-danger, #e8431c); font-weight: 700; }
+.energy .fill { background: var(--ui-accent, #ffb23f); }
 output { font-variant-numeric: tabular-nums; }
 .bar { flex: 1 1 120px; block-size: 8px; background: #ffffff1a; position: relative; overflow: hidden; }
 .fill { position: absolute; inset: 0; background: var(--ui-player, #ff8a1f); transform-origin: left center; }
@@ -41,8 +43,12 @@ export class PxHud extends UiElement {
     <div class="row"><span class="enemy">SWARM</span><output id="alive"></output><span class="dim">alive</span>
       <output id="kills"></output><span class="dim">kills</span><span class="dim">wave</span><output id="waves"></output>
       <span class="dim">downs</span><output id="downs"></output>
+      <span class="dim">elites</span><output id="elites"></output>
       <span class="dim">stress</span><output id="stress"></output><span class="dim">shots</span><output id="shots"></output>
       <span class="dim">rejected</span><output id="rejected"></output></div>
+    <div class="row"><span class="label">CORE</span><div class="bar energy"><div class="fill"></div></div><output id="energy"></output>
+      <span class="dim">[Q]</span><output id="oc"></output><span class="dim">[Space] stomp</span><output id="stomp"></output>
+      <output id="taint" class="danger"></output></div>
     <div class="row dim"><span>tick</span><output id="tick"></output><output id="fps"></output><span>fps</span>
       <span>sim</span><output id="sim"></output><span>ms</span><span>stalls</span><output id="stalls"></output>
       <span>rb95</span><output id="rb"></output></div>
@@ -60,8 +66,17 @@ export class PxHud extends UiElement {
     this.bind(hud.hpRatio, (r) => {
       fill.style.transform = `scaleX(${r})`;
     });
+    const energy = /** @type {HTMLElement} */ (this.$('.energy .fill'));
+    this.bind(hud.energy, (e) => {
+      energy.style.transform = `scaleX(${e / 100})`;
+    });
     text('hp', hud.hp, String);
     text('scrap', hud.scrap, String);
+    text('energy', hud.energy, (e) => `${e}%`);
+    text('oc', hud.overclock, (s) => (s > 0 ? `OVERCLOCK ${s.toFixed(1)} s` : 'overclock'));
+    text('stomp', hud.stomp, (s) => (s > 0 ? `${s.toFixed(1)} s` : 'ready'));
+    text('elites', hud.elites, String);
+    text('taint', hud.taints, (n) => (n > 0 ? `events lost ×${n}: replay tainted` : ''));
     text('x', hud.x, (v) => v.toFixed(1));
     text('y', hud.y, (v) => v.toFixed(1));
     text('alive', hud.alive, String);

@@ -18,6 +18,7 @@
  * @property {number} K GPU→CPU latency in ticks
  * @property {number} seed run seed of the swarm's RNG streams
  * @property {import('../swarm/swarm-contract.js').UnitType[]} types the type table
+ * @property {import('../swarm/swarm-contract.js').StatusSpec[]} [statuses] the status table, by Status index
  * @property {(profile: string) => Partial<import('../swarm/swarm-layout.js').SwarmCaps>} caps pool sizes per heap profile
  */
 
