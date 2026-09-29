@@ -9,12 +9,22 @@
  * @property {number} simMs
  * @property {number} ticks ticks run this frame
  * @property {number} skipped frames skipped because the previous one was still running
+ * @property {number} [readbackP95] ms from submit to harvest (GPU swarm)
+ */
+
+/**
+ * @typedef {object} GameSwarm
+ * @property {number} K GPU→CPU latency in ticks
+ * @property {number} seed run seed of the swarm's RNG streams
+ * @property {import('../swarm/swarm-contract.js').UnitType[]} types the type table
+ * @property {(profile: string) => Partial<import('../swarm/swarm-layout.js').SwarmCaps>} caps pool sizes per heap profile
  */
 
 /**
  * @typedef {object} GameModule
  * @property {import('../ecs/registry.js').ManifestSpec} manifest
  * @property {import('../ui/state-block.js').StateSchema} hud layout of the UI state block
+ * @property {GameSwarm} [swarm] the GPU swarm, if the game has one
  * @property {(sim: import('./sim-core.js').SimCore) => void} setup creates archetypes and the initial
  *   entities, deterministically (it runs before tick 0)
  * @property {(sim: import('./sim-core.js').SimCore, hud: import('../ui/state-block.js').StateBlockWriter, frame: FrameStats) => void} extract

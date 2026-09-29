@@ -269,6 +269,20 @@ The first implementation (M2) runs a subset of the chain, with the same determin
 - v0 dispatches over each pool's **capacity**. Indirect dispatch by high-water mark ([buffers](#buffers)) comes later.
 - Spawn groups already carry their CPU-computed request prefix ([slot allocation](#deterministic-slot-allocation)).
 
+**v0 implementation notes.** The layout lives in `engine/swarm/swarm-layout.js`, the contract in `swarm-contract.js`, and the reference in `engine/swarm/reference/`, one class per pass.
+- **Buffers.** v0 binds six storage buffers: `U` (units), `P` (shots), `A` (accumulators, bins, free lists, scan scratch, shot requests), `I` (a ring of inbound blocks, one per tick encoded in a frame), `O` (the outbound block) and `T` (sine and type tables). It also binds the `Layout` uniform of word offsets, generated from the same field list as the JS layout, and a per-tick parameter uniform. `G` arrives with flow fields. The bin grid is centered on the origin unless configured otherwise, and must cover the arena.
+- **Pass order.** Clear, free-slot scan, shot spawn, unit spawn, bin count, bin scan, bin scatter, steer, integrate, projectiles, resolve, contact, targeting, finalize, then the copy of `O` into the readback slot.
+- **Steering.** Every unit chases proxy 0 (there are no flow fields yet): the seek velocity is the direction to it, scaled to the type's speed by an integer length (`isqrt`, after halving both components until they fit 14 bits). The velocity moves a quarter of the way toward the seek velocity each tick and snaps to it within 4 units, so it settles exactly. Separation:
+  - Pairwise linear repulsion runs against the members of 3×3 neighbour cells holding at most the pairwise cap. Coincident units split along x by slot order.
+  - A denser cell acts as one neighbour at its centroid, weighted by the cap.
+  - An over-full own cell adds a pressure term from the counts of its four neighbours.
+  - Pushing proxies (PATCH) add a soft push.
+  - Each term is clamped to the type's speed and the result to twice that.
+- **Projectiles.** Shots skip their last hit (the slot only, in v0). Kill credit is `(min(damage >> 8, 0x7FFE) + 1) << 16 | source`, so every hit credits a source. Fire request *k* takes free shot slot *k*, which leaves the slot of a command without a target unused for that tick.
+- **Contact.** Contact damage lands when `(tick + anim phase) mod attack interval = 0`. The phase is drawn from the RNG at spawn.
+- **Contract in v0.** Fire commands carry the shot's speed, lifetime and pierce directly; the pattern table comes later. The CPU systems that write swarm commands run serially on the engine worker, in system order, straight into the tick's inbound block; command-buffer segments for them come with parallel producers. The outbound block holds a header (tick, alive counts, rejections, kills, shots fired, contact hits), kills per type and per source, per-proxy damage, and one fire-result bit per command. Events and maps come later.
+- **Tests.** Scene tests, shuffle invariance and a golden hash run in `node --test`. SimCore replays with random readback delays and then stalls, and must give identical hashes.
+
 ## CPU-GPU contract
 
 ### Inbound, every tick (CPU → GPU)

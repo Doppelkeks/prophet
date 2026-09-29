@@ -6,3 +6,5 @@ import { Units } from '../../engine/core/units.js';
 export const ARENA_HALF = Units.q10(64);
 /** PATCH's top speed: 6.5 m/s. */
 export const PATCH_SPEED = Units.q10PerTick(6.5);
+/** PATCH's body radius for the swarm (push and contact): 0.5 m. */
+export const PATCH_RADIUS = Units.q10(0.5);

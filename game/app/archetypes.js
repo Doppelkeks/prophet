@@ -4,4 +4,5 @@
 export const ARCHETYPES = Object.freeze({
   empty: 0,
   pilot: 1,
+  run: 2,
 });

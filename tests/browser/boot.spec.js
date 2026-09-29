@@ -45,7 +45,7 @@ async function drive(page, keys, sx, sy) {
   for (const k of keys) await page.keyboard.up(k);
   const after = /** @type {Record<string, number>} */ (await page.evaluate(() => window.__px?.hud));
   expect(after.tick).toBeGreaterThan(before.tick);
-  expect(after.entities).toBe(1);
+  expect(after.entities).toBe(2); // PATCH and the run's bookkeeping entity
 }
 
 test('boots in the shared tier with WebGPU inside the engine worker; PATCH moves', async ({ page }) => {
@@ -60,6 +60,8 @@ test('boots in the shared tier with WebGPU inside the engine worker; PATCH moves
   expect(px?.frames).toBeGreaterThan(2);
   await drive(page, ['KeyD'], 1, 0);
   await drive(page, ['ArrowUp', 'KeyA'], -1, 1);
+  // The director's first waves arrive and PATCH's auto-fire (GPU-side targeting) kills some.
+  await page.waitForFunction(() => (window.__px?.hud?.kills ?? 0) > 0 && (window.__px?.hud?.alive ?? 0) > 0, null, { timeout: 30_000 });
   await expect(page.locator('px-hud')).toContainText('PATCH');
   const bridge = await page.evaluate(() => window.__px?.bridge);
   expect(bridge?.dropped).toBe(0);

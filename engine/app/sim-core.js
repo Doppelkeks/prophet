@@ -3,11 +3,20 @@
 // command log (docs/engine/09-determinism-coop.md#input-as-commands). No DOM, GPU or clock, so the same
 // code runs in the engine worker and in Node (replays, tests). Integer-only (sim lint).
 import { CommandLog } from '../input/command-log.js';
+import { SwarmInbound, SwarmOutbound } from '../swarm/swarm-contract.js';
 
 /**
  * @typedef {object} SimResources engine-thread services systems may use (serial systems only)
  * @property {{ w0: number, w1: number }} input the input record of the running tick
  * @property {number} tick the running tick
+ * @property {SwarmInbound | null} swarm this tick's inbound swarm block (spawns, fire commands, proxies)
+ * @property {SwarmOutbound | null} swarmOut the swarm's report of tick − K, applied this tick
+ */
+
+/**
+ * @typedef {object} SwarmLink
+ * @property {import('../swarm/swarm-backend.js').SwarmBackend} backend
+ * @property {number} K GPU→CPU latency in ticks (docs/BUDGETS.md#simulation-constants)
  */
 
 export class SimCore {
@@ -18,6 +27,7 @@ export class SimCore {
    *   resources: Record<string, any>,
    *   log?: CommandLog,
    *   hashEvery?: number,
+   *   swarm?: SwarmLink | null,
    * }} o
    */
   constructor(o) {
@@ -31,8 +41,14 @@ export class SimCore {
     this.tick = 0;
     /** @type {number[]} flat [tick, hash] pairs */
     this.hashes = [];
+    /** Ticks that could not run because the swarm block they needed had not arrived. */
+    this.stalls = 0;
+    this.swarm = o.swarm ?? null;
+    this.prevFires = 0;
     this.resources.input = { w0: 0, w1: 0 };
     this.resources.tick = 0;
+    this.resources.swarm = this.swarm ? new SwarmInbound(this.swarm.backend.layout) : null;
+    this.resources.swarmOut = null;
   }
 
   /**
@@ -49,25 +65,57 @@ export class SimCore {
     return this.log.has(this.tick);
   }
 
-  /** Runs one tick. */
+  /**
+   * Runs one tick. With a swarm, tick T first applies the swarm's block of tick T − K; if that block
+   * has not arrived, the tick stalls (returns false) and must be retried later. It is never skipped.
+   * @returns {Promise<boolean>} whether the tick ran
+   */
   async step() {
     const t = this.tick;
     if (!this.log.has(t)) throw new Error(`sim: no input record for tick ${t}`);
-    const input = this.resources.input;
+    const res = this.resources;
+    const swarm = this.swarm;
+    if (swarm) {
+      if (t >= swarm.K) {
+        const block = swarm.backend.take(t - swarm.K);
+        if (!block) {
+          this.stalls++;
+          return false;
+        }
+        const out = new SwarmOutbound(swarm.backend.layout, block);
+        if (out.tick !== t - swarm.K) throw new Error(`sim: swarm block of tick ${out.tick} arrived for tick ${t - swarm.K}`);
+        res.swarmOut = out;
+      } else {
+        res.swarmOut = null;
+      }
+      /** @type {SwarmInbound} */ (res.swarm).reset();
+    }
+    const input = res.input;
     input.w0 = this.log.w0(t);
     input.w1 = this.log.w1(t);
-    this.resources.tick = t;
+    res.tick = t;
     await this.scheduler.tick();
+    if (swarm) {
+      const inbound = /** @type {SwarmInbound} */ (res.swarm);
+      swarm.backend.submit(t, inbound.finish(t), this.prevFires);
+      this.prevFires = inbound.fires;
+    }
     this.tick = t + 1;
     if (this.hashEvery > 0 && this.tick % this.hashEvery === 0) this.hashes.push(this.tick, this.world.hash());
+    return true;
   }
 
-  /** Runs ticks until the log runs out (replays). @param {number} [max] */
-  async replay(max = 0x7fffffff) {
+  /**
+   * Runs ticks until the log runs out (replays). `wait` is called whenever a tick stalls, to let the
+   * swarm's blocks arrive.
+   * @param {number} [max] @param {() => void | Promise<void>} [wait]
+   */
+  async replay(max = 0x7fffffff, wait) {
     let n = 0;
     while (this.ready && n < max) {
-      await this.step();
-      n++;
+      if (await this.step()) n++;
+      else if (wait) await wait();
+      else throw new Error(`sim: tick ${this.tick} stalled and nothing can deliver the swarm block`);
     }
     return n;
   }

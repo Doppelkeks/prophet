@@ -12,6 +12,7 @@ import { InputRing } from '../input/input-ring.js';
 import { InputState } from '../input/input-state.js';
 import { WorkerPorts } from '../jobs/worker-port.js';
 import { Tiers } from '../platform/tiers.js';
+import { SwarmReference } from '../swarm/reference/swarm-reference.js';
 import { StateBlockWriter } from '../ui/state-block.js';
 import { SimBoot } from './sim-boot.js';
 
@@ -111,6 +112,9 @@ export class EngineHost {
       tier: threading,
       workers,
       spawn: (i) => WorkerPorts.spawnBrowser(this.jobWorkerUrl, `px-job-${i}`),
+      // The CPU reference swarm, with small pools, until the GPU swarm backend exists.
+      swarm: (layout, tables, seed) => new SwarmReference(layout, tables, { seed }),
+      swarmProfile: 'test',
     });
     this.sim = boot.sim;
     if (this.shared) {
@@ -165,7 +169,7 @@ export class EngineHost {
       while (this.acc >= TICK_MS && ticks < MAX_TICKS_PER_FRAME) {
         const [w0, w1] = this.actions.sample(this.input);
         sim.stamp(w0, w1);
-        await sim.step();
+        if (!(await sim.step())) break; // stalled on a late swarm block: retry next frame
         this.acc -= TICK_MS;
         ticks++;
       }
