@@ -36,7 +36,7 @@ Prophet's CPU core has four parts that share one rule: **hot data lives in one f
 
 - The heap is one `WebAssembly.Memory`, created at boot with `initial` = `maximum` (in 64 KiB pages) and sized per performance tier ([BUDGETS: shared heap](../BUDGETS.md#shared-heap)). It is **never grown** ([ADR-009](../DECISIONS.md#adr-009-fixed-size-shared-heap)): growing detaches non-shared views and leaves stale-length views in other workers, and large `maximum` reservations can fail on memory-constrained devices.
 - It is `shared: true` only when the page is cross-origin isolated (the `shared` tier); otherwise it is private to the engine worker. A `WebAssembly.Memory`, rather than a bare `SharedArrayBuffer`, lets WASM SIMD kernels later run on the same bytes with no copies.
-- Offset 0 holds the **heap header**: a magic number and layout version, the manifest hash, the arena table (offset, size and allocator kind per arena), the layout epoch, and a few global atomic words (current tick, lane wake words).
+- Offset 0 holds the **heap header** (64 KiB, `engine/core/heap.js`): a magic number and layout version, the manifest hash, the arena table (name, offset and size per arena), and a few global atomic words on their own cache lines (layout epoch, current tick, frame ping). The magic number is written last, so a thread that attaches to a half-formatted heap refuses it. The job queue's wake word lives in the jobs arena.
 
 ### Arenas and allocators
 
@@ -278,27 +278,28 @@ The scheduler *can* split any system that iterates ECS chunks. It *does* so only
 
 ### Queue layout
 
-The job queue lives in the jobs arena as two bounded **multi-producer, multi-consumer (MPMC) rings**, one per priority lane. Each ring cell holds a 64-byte **job descriptor**, one cache line:
+The job queue (`engine/jobs/job-queue.js`) lives in the jobs arena as two bounded **multi-producer, multi-consumer (MPMC) rings** of 1,024 cells, one per priority lane (Vyukov's algorithm: a sequence number per cell, `Atomics.compareExchange` on head and tail). Next to them sit a wake word, a stop flag, and 1,024 **job slots** of one cache line each. Heads, tails and the shared words each have their own cache line. Each ring cell holds a 64-byte **job descriptor**, one cache line:
 
 | Offset | Fields | Type | Notes |
 |---|---|---|---|
-| 0 | `seq` | `u32` | Cell sequence number for the bounded-MPMC protocol (`Atomics.compareExchange` on head and tail) |
-| 4 | `kernel`, `flags` | `u16`, `u16` | Kernel ID from the manifest; parallel-for, idempotent, frame-critical |
+| 0 | `seq` | `u32` | Cell sequence number for the bounded-MPMC protocol |
+| 4 | `kernel`, `flags` | `u16`, `u16` | Kernel ID from the registry; flag bit 0 = parallel-for |
 | 8 | `args[0..5]` | `u32` × 6 | Byte offsets of input and output regions, or immediate values |
 | 32 | `begin`, `end`, `grain` | `u32` × 3 | Item range (ECS chunks, voxel chunks or rows) and items claimed per atomic step |
-| 44 | `cursor`, `counter`, `status` | `u32` × 3 | Offsets of the atomic claim cursor, the completion counter, and the status word (ok or failed, plus the worker ID) |
-| 56 | `tick` | `u32` | Tick that requested the job, for commit rules and tracing; 4 bytes reserved after it |
+| 44 | `slot` | `u32` | Word offset of the job slot: claim cursor, completion counter, status (0 = ok, otherwise failed) and job ID |
+| 48 | `job` | `u32` | Job ID, for errors and tracing; bytes 52–63 are reserved (e.g. the requesting tick, once async commits need it) |
 
 ### Workers and waiting
 
-- **Job workers** loop: pop from the frame-critical lane, else from the background lane, else `Atomics.wait` on the lane's wake word. Producers `Atomics.add` to the wake word and `Atomics.notify` as many workers as they pushed jobs.
-- **The engine worker never blocks.** It pushes jobs, helps drain the frame-critical lane, and awaits a counter with `Atomics.waitAsync`, yielding to its event loop in the meantime. Readback callbacks, FrameDriver pings and messages keep flowing. Where `Atomics.waitAsync` is missing, the last finisher also posts a message ([tiers](#threading-tiers)).
+- **Job workers** (`JobWorkerLoop`) loop: read the wake word, pop from the frame-critical lane, else from the background lane, else `Atomics.wait` on the wake word with the value read *before* the pops. A push that lands in between changes the word, so the wait returns at once and no wake-up is lost. Producers `Atomics.add` to the wake word and `Atomics.notify` as many workers as they pushed jobs. The wait also has a timeout, only as a safety net.
+- **The engine worker never blocks.** It pushes jobs, helps drain the frame-critical lane, and awaits a counter with `Atomics.waitAsync`, yielding to its event loop in the meantime. Readback callbacks, FrameDriver pings and messages keep flowing. Where `Atomics.waitAsync` is missing, it polls the counter on a short timer ([tiers](#threading-tiers)).
+- A kernel that throws marks its job failed, and the worker reports the error by message. `JobSystem.wait` then rejects with `job-failed`. Other jobs are unaffected.
 - Worker counts per performance tier: [BUDGETS: job workers](../BUDGETS.md#job-workers-asynchronous-work).
 
 ### Parallel-for and completion counters
 
-- A parallel-for is **one** descriptor, not one per ECS chunk. Every participant claims `grain` items at a time with `Atomics.add` on the cursor. This balances load dynamically: a worker that wakes late simply claims less.
-- After its last claim, a participant subtracts the number of items it finished from the completion counter. The participant that brings the counter to zero calls `Atomics.notify` on it.
+- A parallel-for is **one descriptor per participant**, never one per ECS chunk: min(job workers + 1, slices) copies that share one job slot. Every participant claims `grain` items at a time with `Atomics.add` on the cursor. This balances load dynamically: a worker that wakes late simply claims less, and the kernel always sees the same `grain`-sized slices, whoever runs them.
+- The completion counter starts at the number of copies. A participant decrements it by one once its claims run dry, and the one that brings it to zero calls `Atomics.notify` on it. Every copy must therefore run before the job completes, so a job slot is never reused while a copy of its descriptor is still queued; a late worker can't claim from a recycled cursor.
 - Chunk indices are positions in the query's chunk list as it was at the start of the stage. Command-buffer keys therefore don't depend on who processed a chunk.
 
 ```mermaid
@@ -306,16 +307,16 @@ sequenceDiagram
   participant E as Engine worker
   participant H as Job queue in the heap
   participant W as Job workers
-  E->>H: push one parallel-for descriptor, counter set to the chunk count
-  E->>W: Atomics.notify on the lane wake word
+  E->>H: push one descriptor per participant, counter set to their number
+  E->>W: Atomics.notify on the wake word
   W->>H: claim chunks with Atomics.add on the cursor
-  E->>H: claim chunks too while the workers wake up
-  W->>H: subtract finished chunks from the counter
+  E->>H: pop a copy and claim chunks too while the workers wake up
+  W->>H: decrement the counter once the cursor passes the end
   H-->>E: the last finisher notifies the counter word
   E->>E: waitAsync resolves, the sync point applies command segments in key order
 ```
 
-A participant's loop is short: `begin = Atomics.add(cursor, grain)`; stop when `begin >= end`; run the kernel on `[begin, min(begin + grain, end))`; finally, if `Atomics.sub(counter, done)` returns `done`, it was the last finisher and calls `Atomics.notify`.
+A participant's loop is short: `begin = Atomics.add(cursor, grain)`; stop when `begin >= end`; run the kernel on `[begin, min(begin + grain, end))`; finally, if `Atomics.sub(counter, 1)` returns 1, it was the last finisher and calls `Atomics.notify`.
 
 ### Priority lanes and slicing
 
@@ -329,7 +330,7 @@ A participant's loop is short: `begin = Atomics.add(cursor, grain)`; stop when `
 
 ### Kernels
 
-- A kernel is a class with a static `id` from the manifest and a `run(heap, desc, begin, end)` method.
+- A kernel is a class with a unique `static key` and a `run(ctx, args, begin, end)` method. `ctx.heap` is the heap (or, in the `transfer` tier, a view of the transferred buffer), and `args` holds the six argument words. `KernelRegistry` numbers the kernels by sorted key and hashes the list; the engine and every job worker build it from the same list (`game/app/kernels.js`).
 - Kernels are **pure functions over heap regions**. They read the input regions and write the output regions named by offsets in the descriptor. They touch no globals, allocate nothing, and never assume absolute addresses. That makes them rebasable, which the `transfer` tier depends on.
 - Async kernels are also **idempotent**: their outputs never overlap their inputs, so a failed or orphaned job can simply be re-run. In-place ECS chunk kernels are not idempotent, which shapes the [failure policy](#fallbacks--failure-modes).
 
@@ -351,12 +352,12 @@ The last row is the point. Because results that affect the sim commit at fixed t
 | Probe | If it fails |
 |---|---|
 | `crossOriginIsolated` and `SharedArrayBuffer` | `transfer` tier |
-| `Atomics.waitAsync` (Firefox support to verify in M1) | The last finisher of a counter posts a message to the engine worker; background counters are polled at frame start |
+| `Atomics.waitAsync` (Firefox support to verify in M1) | The engine polls completion counters on a short timer |
 | Module workers | Release builds use bundled classic worker entry files |
 | WebGPU in a worker | Main-thread host ([runtime topology](01-overview.md#runtime-topology)). The job system is unchanged. |
 | Nested workers (support to verify in M1) | The main thread spawns the job workers and connects them to the engine worker with `MessageChannel`s |
 
-**The `transfer` path.** The dispatcher on the engine worker copies each input region into a pooled `ArrayBuffer` (the heap's own buffer belongs to the `WebAssembly.Memory` and can't be transferred) and posts the descriptor with that buffer in the transfer list, offsets rebased. The worker runs the same kernel over views of the buffer and transfers it back. At or before the commit tick, the dispatcher copies the output regions into the heap and returns the buffer to the pool. The copies make this tier fit only coarse jobs; there is no chunk-parallel ECS in `transfer` ([ADR-008](../DECISIONS.md#adr-008-threading-tiers)).
+**The `transfer` path.** Async jobs name the heap regions they touch (`{ arg, bytes, access: 'read' | 'write' | 'readwrite' }`). The dispatcher on the engine worker (`TransferDispatcher`) copies every named region into a pooled `ArrayBuffer`, 64-byte aligned (the heap's own buffer belongs to the `WebAssembly.Memory` and can't be transferred), and posts the job with that buffer in the transfer list, offsets rebased. The worker runs the same kernel over views of the buffer and transfers it back, also on failure. The dispatcher then copies the `write` and `readwrite` regions into the heap and returns the buffer to the pool; sim-relevant results still commit at fixed ticks. The copies make this tier fit only coarse jobs; parallel-for runs serially on the engine worker, so there is no chunk-parallel ECS in `transfer` ([ADR-008](../DECISIONS.md#adr-008-threading-tiers)).
 
 ## Command buffers and events
 
