@@ -12,6 +12,8 @@ import { InputRing } from '../input/input-ring.js';
 import { InputState } from '../input/input-state.js';
 import { WorkerPorts } from '../jobs/worker-port.js';
 import { Tiers } from '../platform/tiers.js';
+import { ObliqueCamera } from '../render/oblique-camera.js';
+import { Renderer } from '../render/renderer.js';
 import { SwarmReference } from '../swarm/reference/swarm-reference.js';
 import { Swarm } from '../swarm/swarm.js';
 import { StateBlockWriter } from '../ui/state-block.js';
@@ -41,7 +43,7 @@ import { SimBoot } from './sim-boot.js';
  * @property {number | null} [shots] shot-pool override
  */
 
-/** Night-900 from the palette, as the clear color. */
+/** Clear color when the game has no renderer: night-900. */
 const CLEAR = { r: 7 / 255, g: 11 / 255, b: 22 / 255, a: 1 };
 const TICK_MS = 1000 / TICK_HZ;
 const MAX_TICKS_PER_FRAME = 4; // docs/BUDGETS.md#simulation-constants
@@ -71,6 +73,13 @@ export class EngineHost {
     this.hud = null;
     /** @type {Swarm | null} the GPU swarm, when it is the backend */
     this.swarm = null;
+    /** @type {SwarmReference | null} the JS reference, when it is the backend (`?swarm=cpu`) */
+    this.reference = null;
+    /** @type {OffscreenCanvas | null} */
+    this.canvas = null;
+    /** @type {Renderer | null} */
+    this.renderer = null;
+    this.camera = new ObliqueCamera();
     this.shared = false;
     this.input = new InputState();
     this.actions = new ActionMap();
@@ -100,13 +109,44 @@ export class EngineHost {
           for (let i = 0; i + 3 < w.length; i += 4) this.ring.push(w[i], w[i + 1], w[i + 2], w[i + 3]);
         }
         break;
+      case 'resize':
+        this.resize(msg.width, msg.height);
+        break;
+      case 'capture':
+        this.capture(msg.id);
+        break;
     }
+  }
+
+  /** The canvas in device pixels (docs/engine/04-pixel-art-pipeline.md#resolution-and-scaling). @param {number} width @param {number} height */
+  resize(width, height) {
+    const w = Math.max(1, Math.floor(width));
+    const h = Math.max(1, Math.floor(height));
+    if (this.canvas && (this.canvas.width !== w || this.canvas.height !== h)) {
+      this.canvas.width = w;
+      this.canvas.height = h;
+    }
+    this.renderer?.resize(w, h);
+  }
+
+  /** Posts the internal image of the last frame to the main thread (tests, bug reports). @param {number} id */
+  capture(id) {
+    const r = this.renderer;
+    if (!r) {
+      this.scope.postMessage({ type: 'capture', id, error: 'no renderer' });
+      return;
+    }
+    r.capture().then(
+      (img) => this.scope.postMessage({ type: 'capture', id, tick: this.sim?.tick ?? 0, ...img }, { transfer: [img.data.buffer] }),
+      (err) => this.scope.postMessage({ type: 'capture', id, error: String(err) }),
+    );
   }
 
   /** @param {InitMessage} msg */
   async init(msg) {
-    msg.canvas.width = msg.width;
-    msg.canvas.height = msg.height;
+    this.canvas = msg.canvas;
+    msg.canvas.width = Math.max(1, msg.width);
+    msg.canvas.height = Math.max(1, msg.height);
     this.gpu = await GpuDevice.create({ canvas: msg.canvas });
     this.gpu.lost.then((info) => this.fail(new Error(`webgpu-device-lost (${info.reason}): ${info.message}`)));
     this.gpu.device.addEventListener('uncapturederror', (e) => {
@@ -137,6 +177,13 @@ export class EngineHost {
       swarmCaps: caps,
     });
     this.sim = boot.sim;
+    if (boot.swarm && !gpuSwarm) this.reference = /** @type {SwarmReference} */ (boot.swarm.backend);
+    if (this.game.render) {
+      const r = await Renderer.create(device, this.gpu.format, this.game.render.style);
+      r.resize(msg.canvas.width, msg.canvas.height);
+      if (this.swarm) r.bindSwarm(this.swarm.layout, this.swarm.buffers.U, this.swarm.buffers.P);
+      this.renderer = r;
+    }
     if (this.shared) {
       this.ring = new InputRing(heap.i32, boot.plan.input.off >> 2);
       this.ring.format();
@@ -160,6 +207,7 @@ export class EngineHost {
         perfTier: perf,
         jobWorkers: boot.workers,
         swarm: boot.swarm ? { backend: gpuSwarm ? 'gpu' : 'cpu', units: boot.swarm.backend.layout.caps.units, shots: boot.swarm.backend.layout.caps.shots } : null,
+        render: this.renderer ? { k: this.renderer.viewport.k, width: this.renderer.viewport.internalW, height: this.renderer.viewport.internalH } : null,
         format: this.gpu.format,
         features: [...this.gpu.features].sort(),
         manifest: boot.manifest.hash,
@@ -241,10 +289,26 @@ export class EngineHost {
     const gpu = this.gpu;
     if (!gpu || !gpu.context) return;
     const encoder = gpu.device.createCommandEncoder();
-    const pass = encoder.beginRenderPass({
-      colorAttachments: [{ view: gpu.context.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: CLEAR }],
-    });
-    pass.end();
+    const target = gpu.context.getCurrentTexture().createView();
+    const r = this.renderer;
+    const game = this.game.render;
+    const sim = this.sim;
+    if (r && game && sim) {
+      // Everything draws between the last two ticks: pos - vel * (1 - alpha).
+      const alpha = Math.min(1, Math.max(0, this.acc / TICK_MS));
+      const count = game.actors(sim, r.actors);
+      const a = r.actors;
+      const back = 1 - alpha;
+      if (count > 0) {
+        const lift = game.style.lift ?? 0;
+        this.camera.follow((a[0] - a[3] * back) / 1024, (a[1] - a[4] * back) / 1024, a[2] / 1024 + lift);
+      }
+      if (this.reference) r.uploadSwarm(this.reference.layout, this.reference.b.U, this.reference.b.P);
+      r.encode(encoder, target, this.camera, alpha, count);
+    } else {
+      const pass = encoder.beginRenderPass({ colorAttachments: [{ view: target, loadOp: 'clear', storeOp: 'store', clearValue: CLEAR }] });
+      pass.end();
+    }
     gpu.device.queue.submit([encoder.finish()]);
   }
 

@@ -126,6 +126,37 @@ export class RenderGraph {
 }
 ```
 
+## Renderer v0
+
+The M1–M2 tech demo draws with a fixed two-pass renderer (`engine/render/renderer.js`). The render graph above replaces it in M3. It already follows the pixel rules of [04](04-pixel-art-pipeline.md): oblique projection, integer scale, camera snapping and the sub-pixel upscale.
+
+**Scene pass**, into an `rgba8unorm` texture at the internal size with a `depth24plus` buffer:
+1. **Ground.** A full-screen triangle. The fragment shader turns its pixel back into a world position at z = 0 and draws a two-tone checker in world space, the arena edge line, and a darker outside. It writes no depth.
+2. **Boxes, drawn by vertex pulling.** One pipeline (`cubes.wgsl`) with an override `SOURCE` handles three instance streams:
+   - swarm units, read straight from the swarm's `U` buffer;
+   - shots, from `P`;
+   - actors, from a small buffer the game fills each frame.
+
+   Each instance draws 12 vertices: the top face and the camera-facing front face as two quads. The ±x walls are edge-on, and the back is hidden.
+   - The box is snapped to whole internal pixels, with the ground axis (y) and the height (z) rounded separately, so depth stays exact.
+   - Dead slots and instances outside the view collapse to a clipped point.
+   - Three toon bands: the top, the front, and a shadow band on the bottom third of the front.
+
+**Upscale pass.** A full-screen triangle into the canvas, nearest-neighbour (`textureLoad`) by *k*. It crops the border and the overscan, and adds the camera remainder as a whole-output-pixel offset.
+
+**The game supplies the look** through `GameModule.render` (`engine/render/render-style.js`):
+- palette tokens;
+- box sizes in internal pixels for each swarm type, each actor style and shots;
+- an `actors(sim, out)` extract of `ACTOR_WORDS` records.
+
+The renderer loads the palette from the game's CSS file (`game/ui/palette.css`) through the shader loader. The `--c-*` tokens therefore stay the only place hex values are written ([game/03](../game/03-art-audio.md#palette)).
+
+**Interpolation.** Everything draws between the last two ticks, at `pos − vel · (1 − α)` with α = accumulator / tick. The camera follows the first actor record, lifted by `style.lift`.
+
+**Engine messages.**
+- `resize`: the main thread's `CanvasMeter` measures the canvas in exact device pixels (`devicePixelContentBoxSize`, with CSS size × DPR as the fallback). The engine then resizes the `OffscreenCanvas` and reallocates the internal targets.
+- `capture`: copies the internal image of the last frame back to the main thread, exposed as `window.__px.capture()`. Tests use it to check pixels exactly.
+
 ## WebGPU limits policy
 
 We request no limits, so the WebGPU defaults are hard ceilings for every shader and buffer ([ADR-003](../DECISIONS.md#adr-003-webgpu-only)). The values in parentheses are the spec defaults as we read them; we re-check them against each browser in M1.
@@ -429,6 +460,13 @@ Presentation timing on Safari, which has no worker rAF, is to verify in M1.
 ## Testing
 
 - **Golden images:** Playwright + Chromium with WebGPU renders fixed scenes (seed, camera, tick) and compares them pixel-exactly, on GPU runners and on SwiftShader ([10](10-tooling-testing.md#testing-strategy)).
+  - Today, `tests/browser/render.spec.js` checks captures of the internal image for exact palette colors:
+    - PATCH's orange at the screen center;
+    - the Sweep's cyan;
+    - the ground checker;
+    - the camera following PATCH;
+    - *k* and the internal size after a resize, for both swarm backends.
+  - It attaches the captures and a canvas screenshot to the report.
 - **Shader compile tests:** every variant in the pipeline manifest compiles without `getCompilationInfo()` errors, including on SwiftShader. Running at default limits there also catches accidental reliance on higher limits.
 - **Render-graph unit tests** (`node:test`, mock device): culling, hazard detection, aliasing, and zero allocation in `run`.
 - **Readback ring tests** with injected map latency: in-order harvest, stalls, no leaked slots.

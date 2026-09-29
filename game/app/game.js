@@ -2,8 +2,10 @@
 // SCRAPWAKE as a game module (engine/app/game-module.js): what the engine worker and Node replays run.
 // No DOM, GPU or clock in here.
 import { Units } from '../../engine/core/units.js';
+import { ACTOR_WORDS } from '../../engine/render/render-style.js';
 import { Director, Gun, Health, Motion, Pilot, RunStats, Transform } from '../components/index.js';
 import { PATCH_SPEED } from '../data/arena.js';
+import { ACTOR_STYLE, RENDER_STYLE } from '../data/render-styles.js';
 import { SWARM_CAPS, SWARM_TYPES } from '../data/swarm-types.js';
 import { HUD } from '../state/hud-state.js';
 import { ARCHETYPES } from './archetypes.js';
@@ -20,6 +22,29 @@ export const SCRAPWAKE = {
     seed: 0x5c4a9,
     types: SWARM_TYPES,
     caps: (profile) => SWARM_CAPS[profile] ?? SWARM_CAPS.std,
+  },
+  render: {
+    style: RENDER_STYLE,
+    actors(sim, out) {
+      const world = sim.world;
+      const patch = sim.resources.patch;
+      const x = world.get(patch, Transform.x);
+      const y = world.get(patch, Transform.y);
+      const z = world.get(patch, Transform.z);
+      const vx = world.get(patch, Motion.vx);
+      const vy = world.get(patch, Motion.vy);
+      // PATCH as two boxes; the camera follows the first record.
+      for (let i = 0; i < 2; i++) {
+        const r = i * ACTOR_WORDS;
+        out[r] = x;
+        out[r + 1] = y;
+        out[r + 2] = z;
+        out[r + 3] = vx;
+        out[r + 4] = vy;
+        out[r + 5] = i === 0 ? ACTOR_STYLE.PATCH_BODY : ACTOR_STYLE.PATCH_HEAD;
+      }
+      return 2;
+    },
   },
 
   setup(sim) {

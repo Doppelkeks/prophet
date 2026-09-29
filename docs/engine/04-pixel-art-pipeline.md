@@ -118,6 +118,8 @@ export class CanvasMeter {
 }
 ```
 
+The implementation is `engine/render/pixel-viewport.js`, `engine/render/oblique-camera.js` and `engine/render/canvas-meter.js` (the main thread's meter; its `observe()` watches the `device-pixel-content-box`). The renderer that uses them is described in [03](03-rendering.md#renderer-v0).
+
 **Canvas sizing.**
 - A `ResizeObserver` on the main thread measures the canvas. It prefers `devicePixelContentBoxSize`, which gives exact device pixels. Safari lacks it (to verify in M1), so there the CSS size × `devicePixelRatio` is rounded manually.
 - The main thread posts the size to the engine worker. The worker sets the OffscreenCanvas `width` and `height` and recompiles the render graph ([03](03-rendering.md#render-graph)).
@@ -140,7 +142,7 @@ This is the technique popularized by t3ssel8r. The camera renders snapped to the
 
 The result: scrolling is smooth at output resolution, in steps of 1/*k* internal pixel, and nothing crawls. In static regions, every output frame is an exact integer translation of the previous one.
 
-**Objects.** Actors, swarm units and particles are interpolated at display rate, then snapped to whole internal pixels in camera space.
+**Objects.** Actors, swarm units and particles are interpolated at display rate, then snapped to whole internal pixels in camera space. The ground axis and the height are rounded separately, so the depth of a snapped box stays exact.
 - Their voxel patterns never shift by a fraction of a pixel, so they don't shimmer. They move over the world in 1-pixel steps.
 - PATCH is snapped too, so it wobbles by less than one internal pixel around the screen center while the world scrolls smoothly. We accept this until look-dev says otherwise.
 

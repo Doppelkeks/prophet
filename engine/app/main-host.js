@@ -4,6 +4,7 @@ import { InputCapture } from '../input/input-capture.js';
 import { InputRing } from '../input/input-ring.js';
 import { Probes } from '../platform/probes.js';
 import { Tiers } from '../platform/tiers.js';
+import { CanvasMeter } from '../render/canvas-meter.js';
 import { Signals } from '../ui/signal.js';
 import { StateBlockReader } from '../ui/state-block.js';
 import { DevReload } from './dev-reload.js';
@@ -20,6 +21,17 @@ import { DevReload } from './dev-reload.js';
  * @property {Record<string, number> | null} hud   the last state-block snapshot, decoded
  * @property {{ dropped: number, retries: number }} bridge input records dropped, state-block read retries
  * @property {string | null} error
+ * @property {() => Promise<Capture>} capture the internal image of the engine's last frame
+ */
+
+/**
+ * @typedef {object} Capture  The engine's internal image: RGBA, top row first, no border cropped.
+ * @property {number} width
+ * @property {number} height
+ * @property {Uint8Array} data
+ * @property {number} tick the sim tick when it was taken
+ * @property {import('../render/renderer.js').FrameView} view camera and viewport of that frame
+ * @property {Record<string, number>} palette token → 0xRRGGBB of the colors in use
  */
 
 /**
@@ -59,7 +71,13 @@ export class MainHost {
       hud: null,
       bridge: { dropped: 0, retries: 0 },
       error: null,
+      capture: () => this.requestCapture(),
     };
+    /** @type {Map<number, { resolve: (c: Capture) => void, reject: (e: Error) => void }>} */
+    this.captures = new Map();
+    this.captureId = 0;
+    /** @type {ResizeObserver | null} */
+    this.resizer = null;
     /** @type {Worker | null} */
     this.worker = null;
     /** @type {InputRing | null} */
@@ -130,6 +148,12 @@ export class MainHost {
       case 'state':
         this.reader?.receive(msg.words);
         return;
+      case 'capture': {
+        const p = this.captures.get(msg.id);
+        this.captures.delete(msg.id);
+        if (p) msg.error ? p.reject(new Error(msg.error)) : p.resolve(msg);
+        return;
+      }
       case 'stats':
         this.debug.frames = msg.frames;
         this.debug.gpuWaits = msg.gpuWaits ?? 0;
@@ -161,6 +185,7 @@ export class MainHost {
     }
     this.capture = new InputCapture(this.ring, this.canvas, window);
     this.capture.attach();
+    this.resizer = CanvasMeter.observe(this.canvas, (width, height) => this.worker?.postMessage({ type: 'resize', width, height }));
     this.looping = true;
     requestAnimationFrame(this.loop);
   }
@@ -195,12 +220,24 @@ export class MainHost {
     Signals.flush();
   }
 
+  /** @returns {Promise<Capture>} */
+  requestCapture() {
+    const worker = this.worker;
+    if (!worker || this.debug.status !== 'ok') return Promise.reject(new Error('engine not running'));
+    const id = ++this.captureId;
+    return new Promise((resolve, reject) => {
+      this.captures.set(id, { resolve, reject });
+      worker.postMessage({ type: 'capture', id });
+    });
+  }
+
   /** @param {string} message */
   fail(message) {
     this.debug.status = 'error';
     this.debug.error = message;
     this.looping = false;
     this.capture?.detach();
+    this.resizer?.disconnect();
     console.error(`[prophet] ${message}`);
     this.render();
   }

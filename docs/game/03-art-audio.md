@@ -44,7 +44,10 @@ The art bible and audio direction for SCRAPWAKE: palette, scale, lighting, chara
 
 ### CSS custom properties
 
-The canonical file is `game/ui/palette.css` (proposed). The DOM UI imports it ([CSS architecture](../engine/07-ui.md#css-architecture)), and the asset cooker parses its `--c-*: #RRGGBB;` declarations to build the colour-grading LUT and the MagicaVoxel master palette ([asset pipeline](../engine/10-tooling-testing.md#asset-pipeline)). The `--ui-*` aliases are UI-only; colourblind presets override aliases, never primitives.
+The canonical file is `game/ui/palette.css`. It is parsed for its `--c-*: #RRGGBB;` declarations in three places:
+- The DOM UI imports it ([CSS architecture](../engine/07-ui.md#css-architecture)).
+- The renderer reads it at boot for its palette ([renderer v0](../engine/03-rendering.md#renderer-v0)).
+- The asset cooker builds the colour-grading LUT and the MagicaVoxel master palette from it ([asset pipeline](../engine/10-tooling-testing.md#asset-pipeline)). The `--ui-*` aliases are UI-only; colourblind presets override aliases, never primitives.
 
 ```css
 /* game/ui/palette.css: the only place palette hex values are written. */
