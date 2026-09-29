@@ -1,11 +1,11 @@
 // @ts-check
 // Renderer v0 (docs/engine/03-rendering.md#renderer-v0): the scene at the internal resolution through the
-// oblique camera (ground, swarm units, shots and actors as vertex-pulled boxes, with a depth buffer), then a
+// oblique camera (ground, swarm units, shots, pickups and actors as vertex-pulled boxes, with a depth buffer), then a
 // nearest-neighbour upscale to the canvas (docs/engine/04-pixel-art-pipeline.md). Units and shots are read
 // straight from the swarm's GPU buffers. Render code: floats are fine here.
 import { PipelineCache } from '../gpu/pipeline-cache.js';
 import { WgslPreprocessor } from '../gpu/wgsl-preprocessor.js';
-import { SHOT_ALIVE, UNIT_ALIVE } from '../swarm/swarm-layout.js';
+import { PICK_ALIVE, SHOT_ALIVE, UNIT_ALIVE } from '../swarm/swarm-layout.js';
 import { PixelViewport } from './pixel-viewport.js';
 import { ACTOR_WORDS } from './render-style.js';
 
@@ -13,9 +13,10 @@ const SHADERS = '/engine/render/shaders/';
 const UNIT_STYLES = 0;
 const ACTOR_STYLES = 16;
 const SHOT_STYLE = 32;
-const STYLE_COUNT = 33;
+const PICKUP_STYLE = 33;
+const STYLE_COUNT = 36; // a multiple of 4 keeps the uniform's size simple
 const PALETTE_SIZE = 32;
-const FRAME_WORDS = 24;
+const FRAME_WORDS = 28;
 /** Depth range in internal px (y − z) mapped onto [0, 1] around the camera: ±256 m. */
 const DEPTH_RANGE = 4096;
 const COLOR_FORMAT = 'rgba8unorm';
@@ -91,6 +92,7 @@ export class Renderer {
     style.units.forEach((b, i) => box(UNIT_STYLES + i, b));
     style.actors.forEach((b, i) => box(ACTOR_STYLES + i, b));
     box(SHOT_STYLE, style.shot);
+    box(PICKUP_STYLE, style.pickup);
     const g = style.ground;
     this.groundColors = color(g.a) | (color(g.b) << 8) | (color(g.edge) << 16) | (color(g.outside) << 24);
 
@@ -154,10 +156,12 @@ export class Renderer {
       [
         ['UNIT_ALIVE', UNIT_ALIVE],
         ['SHOT_ALIVE', SHOT_ALIVE],
+        ['PICK_ALIVE', PICK_ALIVE],
         ['ACTOR_WORDS', ACTOR_WORDS],
         ['UNIT_STYLES', UNIT_STYLES],
         ['ACTOR_STYLES', ACTOR_STYLES],
         ['SHOT_STYLE', SHOT_STYLE],
+        ['PICKUP_STYLE', PICKUP_STYLE],
         ['STYLE_COUNT', STYLE_COUNT],
       ]
         .map(([k, v]) => `const ${k}: u32 = ${Number(v) >>> 0}u;`)
@@ -180,7 +184,7 @@ export class Renderer {
         primitive: { topology: 'triangle-list' },
         depthStencil: depthTest,
       });
-    const [g, units, shots, actors, up] = await Promise.all([
+    const [g, units, shots, actors, pickups, up] = await Promise.all([
       device.createRenderPipelineAsync({
         label: 'render.ground',
         layout: sceneLayout,
@@ -192,6 +196,7 @@ export class Renderer {
       cube(0),
       cube(1),
       cube(2),
+      cube(3),
       device.createRenderPipelineAsync({
         label: 'render.upscale',
         layout: upLayout,
@@ -200,7 +205,7 @@ export class Renderer {
         primitive: { topology: 'triangle-list' },
       }),
     ]);
-    this.pipelines = { ground: g, units, shots, actors, upscale: up };
+    this.pipelines = { ground: g, units, shots, actors, pickups, upscale: up };
   }
 
   /**
@@ -326,6 +331,10 @@ export class Renderer {
     u[21] = L ? L.shotCap : 0;
     u[22] = actors;
     u[23] = this.groundColors;
+    u[24] = L ? L.kPosX : 0;
+    u[25] = L ? L.kPosY : 0;
+    u[26] = L ? L.kInfo : 0;
+    u[27] = L ? L.pickCap : 0;
     q.writeBuffer(this.frameBuffer, 0, this.frameWords);
     if (actors) q.writeBuffer(this.actorBuffer, 0, this.actors, 0, actors * ACTOR_WORDS);
     const [ox, oy] = camera.offset(vp.k);
@@ -366,6 +375,10 @@ export class Renderer {
     if (L && L.shotCap) {
       scene.setPipeline(P.shots);
       scene.draw(12, L.shotCap);
+    }
+    if (L && L.pickCap) {
+      scene.setPipeline(P.pickups);
+      scene.draw(12, L.pickCap);
     }
     if (actors) {
       scene.setPipeline(P.actors);

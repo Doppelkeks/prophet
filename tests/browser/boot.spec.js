@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { PORTS } from './playwright.config.js';
 
 /** Small swarm pools keep SwiftShader fast; swarm.spec.js covers the large scales. */
-const POOLS = 'units=4096&shots=1024';
+const POOLS = 'units=4096&shots=1024&pickups=512';
 
 /**
  * Opens a page, collects errors, and waits until the boot finished (ok, error or unsupported).

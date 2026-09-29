@@ -5,7 +5,7 @@
 // changes results.
 import { Hash32 } from '../../core/hash32.js';
 import { Rng } from '../../core/rng.js';
-import { IH } from '../swarm-layout.js';
+import { IH, MISC } from '../swarm-layout.js';
 import { SwarmKeys } from '../swarm-contract.js';
 import { BinCount } from './bin-count.js';
 import { BinScan } from './bin-scan.js';
@@ -15,6 +15,8 @@ import { Contact } from './contact.js';
 import { Finalize } from './finalize.js';
 import { FreeScan } from './free-scan.js';
 import { Integrate } from './integrate.js';
+import { PickupSpawn } from './pickup-spawn.js';
+import { Pickups } from './pickups.js';
 import { Projectiles } from './projectiles.js';
 import { Resolve } from './resolve.js';
 import { ShotSpawn } from './shot-spawn.js';
@@ -23,10 +25,10 @@ import { SwarmBuffers } from './swarm-buffers.js';
 import { Targeting } from './targeting.js';
 import { UnitSpawn } from './unit-spawn.js';
 
-/** The v0 pass chain, in order. */
+/** The pass chain, in order. */
 export const PASSES = /** @type {const} */ ([
-  'clear', 'freeScan', 'shotSpawn', 'unitSpawn', 'binCount', 'binScan', 'binScatter',
-  'steer', 'integrate', 'projectiles', 'resolve', 'contact', 'targeting', 'finalize',
+  'clear', 'freeScan', 'shotSpawn', 'pickupSpawn', 'unitSpawn', 'binCount', 'binScan', 'binScatter',
+  'steer', 'integrate', 'projectiles', 'resolve', 'contact', 'targeting', 'pickups', 'finalize',
 ]);
 
 /** A small xorshift for shuffle mode (test-only randomness, never part of the simulation). */
@@ -104,6 +106,8 @@ export class SwarmReference {
     after?.('freeScan', b);
     ShotSpawn.run(b, p);
     after?.('shotSpawn', b);
+    PickupSpawn.run(b, p);
+    after?.('pickupSpawn', b);
     UnitSpawn.run(b, p);
     after?.('unitSpawn', b);
     BinCount.run(b);
@@ -118,12 +122,14 @@ export class SwarmReference {
     after?.('integrate', b);
     Projectiles.run(b, this.shuffle);
     after?.('projectiles', b);
-    Resolve.run(b);
+    Resolve.run(b, p);
     after?.('resolve', b);
     Contact.run(b, p);
     after?.('contact', b);
     Targeting.run(b, p);
     after?.('targeting', b);
+    Pickups.run(b, p);
+    after?.('pickups', b);
     Finalize.run(b, p);
     after?.('finalize', b);
   }
@@ -150,14 +156,17 @@ export class SwarmReference {
   }
 
   /**
-   * Canonical swarm state hash: the persistent pools by slot (units, shots) and the pending shot
-   * requests. Bins and accumulator scratch are excluded (docs/engine/05-gpu-swarm.md#reference-implementation).
+   * Canonical swarm state hash: the persistent pools by slot (units, shots, pickups), the pending shot
+   * requests and drops, and the scrap carry. Bins and accumulator scratch are excluded
+   * (docs/engine/05-gpu-swarm.md#reference-implementation).
    */
   hash() {
     const b = this.b;
     const L = b.L;
     let h = Hash32.words(b.U, 0, b.U.length);
     h = Hash32.words(b.P, 0, b.P.length, h);
-    return Hash32.words(b.A, L.aReq, L.fireCap * 8, h);
+    h = Hash32.words(b.A, L.aReq, L.fireCap * 8, h);
+    h = Hash32.words(b.A, L.aDrop, L.unitCap, h);
+    return Hash32.words(b.A, L.aMisc + MISC.SCRAP_CARRY, 1, h);
   }
 }

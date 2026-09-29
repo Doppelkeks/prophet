@@ -141,19 +141,112 @@ test('the swarm chases proxy 0 and a pushing proxy keeps units off it', () => {
   assert.ok(near >= 15, `${near} units reached the proxy`);
 });
 
+/** @param {number} value @param {Partial<import('../../engine/swarm/swarm-contract.js').UnitType>} [o] */
+const dropper = (value, o = {}) => [{ ...TEST_TYPES[0], dropChance: 65536, dropValue: value, ...o }];
+/** @param {import('../../engine/swarm/swarm-contract.js').SwarmInbound} i @param {number} x @param {number} y @param {number} magnet */
+const collector = (i, x, y, magnet) => i.proxy({ entity: 1, x, y, radius: 512, team: Team.PLAYER, flags: ProxyFlag.COLLECTOR, aux: magnet });
+
+test('a death drops its scrap as a gem next tick, where the unit died; a collector pulls it in and counts it exactly', () => {
+  const h = new SwarmHarness({}, { types: dropper(3) });
+  h.unit(5, 10 * M, 0);
+  h.doom(5);
+  let out = h.step();
+  assert.equal(h.alive(5), false);
+  assert.equal(out?.scrapDropped, 3, 'dropped with its tick');
+  assert.deepEqual(h.pickups(), [], 'the gem appears next tick');
+  const [ux, uy] = h.pos(5);
+  out = h.step();
+  assert.deepEqual(h.pickups(), [[0, ux, uy, 3]], 'free pickup slot 0, at the death position');
+  assert.equal(out?.pickupsAlive, 1);
+  // A collector 3 m away with a 4 m magnet: the gem flies in at 12 m/s and is collected on touch.
+  let collected = 0;
+  let ticks = 0;
+  while (h.pickups().length && ticks < 60) {
+    out = h.step((i) => collector(i, 7 * M, 0, 4 * M));
+    collected += out?.proxyScrap(0) ?? 0;
+    ticks++;
+  }
+  assert.equal(collected, 3);
+  assert.ok(ticks > 5 && ticks < 20, `collected after ${ticks} ticks`);
+  assert.equal(out?.scrapCollected, 3);
+  // Out of magnet range, a gem stays where it lies, forever.
+  h.unit(6, -20 * M, 0);
+  h.doom(6);
+  h.step();
+  for (let t = 0; t < 30; t++) h.step((i) => collector(i, 7 * M, 0, 4 * M));
+  assert.equal(h.pickups().length, 1);
+  assert.deepEqual(h.pickups()[0].slice(1, 3), h.pos(6));
+});
+
+test('drops beyond the free pickup slots join the carry and return as one merged gem near proxy 0: no scrap is lost', () => {
+  const h = new SwarmHarness({ pickups: 4 }, { types: dropper(2) });
+  for (let s = 0; s < 12; s++) {
+    h.unit(s, Math.round(Math.cos(s / 2) * M), Math.round(Math.sin(s / 2) * M));
+    h.doom(s);
+  }
+  let dropped = 0;
+  let collected = 0;
+  let sawCarry = 0;
+  let sawMerged = 0;
+  for (let t = 0; t < 80; t++) {
+    const out = /** @type {import('../../engine/swarm/swarm-contract.js').SwarmOutbound} */ (h.step((i) => collector(i, 0, 0, 3 * M)));
+    dropped += out.scrapDropped;
+    collected += out.proxyScrap(0);
+    const ground = h.pickups().reduce((sum, p) => sum + p[3], 0);
+    assert.equal(dropped, collected + ground + out.scrapCarry + h.pendingDrops(), `tick ${t}: dropped = collected + on the ground + carried + pending`);
+    sawCarry = Math.max(sawCarry, out.scrapCarry);
+    for (const p of h.pickups()) sawMerged = Math.max(sawMerged, p[3]);
+  }
+  assert.equal(dropped, 24);
+  assert.equal(sawCarry, 16, 'eight drops found no free slot');
+  assert.equal(sawMerged, 16, 'and came back as one gem');
+  assert.equal(collected, 24);
+  assert.deepEqual(h.pickups(), []);
+});
+
+test('scrap the CPU deposits comes back as one gem 2 m north of proxy 0', () => {
+  const h = new SwarmHarness();
+  const out = h.step((i) => {
+    i.proxy({ entity: 1, x: 3 * M, y: -M, radius: 512, team: Team.PLAYER });
+    i.depositScrap(7);
+  });
+  assert.deepEqual(h.pickups(), [[0, 3 * M, M, 7]]);
+  assert.equal(out?.scrapCarry, 0);
+  const none = new SwarmHarness();
+  const kept = none.step((i) => i.depositScrap(5)); // no proxy to put it near: it stays carried
+  assert.equal(kept?.scrapCarry, 5);
+  assert.deepEqual(none.pickups(), []);
+});
+
+test('a drop chance is a deterministic roll per tick and slot', () => {
+  const run = () => {
+    const h = new SwarmHarness({ units: 512, pickups: 512 }, { types: dropper(1, { dropChance: 16384 }) });
+    for (let s = 0; s < 400; s++) {
+      h.unit(s, ((s % 20) - 10) * M, (Math.floor(s / 20) - 10) * M);
+      h.doom(s);
+    }
+    return /** @type {import('../../engine/swarm/swarm-contract.js').SwarmOutbound} */ (h.step()).scrapDropped;
+  };
+  const n = run();
+  assert.ok(n > 60 && n < 140, `${n} of 400 deaths dropped at a 25 % chance`);
+  assert.equal(run(), n);
+});
+
 /** A busy scene: rings of all types, a pushing player proxy that fires every tick. */
 function busy(/** @type {{ shuffle?: number }} */ o) {
   const h = new SwarmHarness({ units: 512, shots: 128 }, { seed: 777, shuffle: o.shuffle });
   const hashes = [];
+  let scrap = 0;
   for (let t = 0; t < 240; t++) {
     const out = h.step((i) => {
       if (t % 40 === 0) i.spawnRing({ type: (t / 40) % 3, count: 60, cx: 0, cy: 0, r0: 8 * M, r1: 12 * M });
-      i.proxy({ entity: 1, x: 0, y: 0, radius: 512, team: Team.PLAYER, flags: ProxyFlag.PUSHES });
+      i.proxy({ entity: 1, x: 0, y: 0, radius: 512, team: Team.PLAYER, flags: ProxyFlag.PUSHES | ProxyFlag.COLLECTOR, aux: 4 * M });
       i.fire({ source: t % 5, x: 0, y: 0, range: 10 * M, damage: 700, speed: 600, life: 30, pierce: t % 2 });
     });
     hashes.push(h.ref.hash(), ...Array.from(/** @type {any} */ (out).block));
+    scrap += out?.scrapCollected ?? 0;
   }
-  return { hashes, h };
+  return { hashes, h, scrap };
 }
 
 test('shuffled bin and shot orders give the same results, tick for tick', () => {
@@ -166,9 +259,10 @@ test('shuffled bin and shot orders give the same results, tick for tick', () => 
  * Golden hash of the busy scene after 240 ticks. It pins the reference kernels: a change here is a
  * change to the simulation, re-blessed on purpose (docs/engine/09-determinism-coop.md#replays-and-hashes).
  */
-const GOLDEN_BUSY = 0xc67b1fb0;
+const GOLDEN_BUSY = 0x9153d617; // re-blessed for pickups (drops, magnet, collection) in the pass chain
 
 test('the busy scene matches its golden hash', () => {
-  const { h } = busy({});
+  const { h, scrap } = busy({});
+  assert.ok(scrap > 0, 'the scene drops and collects scrap, so the hash covers pickups');
   assert.equal(h.ref.hash(), GOLDEN_BUSY, `got 0x${h.ref.hash().toString(16)}`);
 });

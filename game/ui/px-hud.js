@@ -25,6 +25,7 @@ const CSS = `
 .label { color: var(--ui-player, #ff8a1f); font-weight: 700; letter-spacing: 0.08em; }
 .enemy { color: var(--ui-enemy, #3de0ff); font-weight: 700; letter-spacing: 0.08em; }
 .dim { color: var(--ui-text-dim, #8da2c0); }
+.scrap { color: var(--ui-accent, #ffb23f); font-weight: 700; letter-spacing: 0.08em; }
 output { font-variant-numeric: tabular-nums; }
 .bar { flex: 1 1 120px; block-size: 8px; background: #ffffff1a; position: relative; overflow: hidden; }
 .fill { position: absolute; inset: 0; background: var(--ui-player, #ff8a1f); transform-origin: left center; }
@@ -35,6 +36,7 @@ export class PxHud extends UiElement {
   static styles = [CSS];
   static template = `
     <div class="row"><span class="label">PATCH</span><div class="bar"><div class="fill"></div></div><output id="hp"></output>
+      <span class="scrap">SCRAP</span><output id="scrap"></output>
       <span class="dim">x</span><output id="x"></output><span class="dim">y</span><output id="y"></output></div>
     <div class="row"><span class="enemy">SWARM</span><output id="alive"></output><span class="dim">alive</span>
       <output id="kills"></output><span class="dim">kills</span><span class="dim">wave</span><output id="waves"></output>
@@ -59,6 +61,7 @@ export class PxHud extends UiElement {
       fill.style.transform = `scaleX(${r})`;
     });
     text('hp', hud.hp, String);
+    text('scrap', hud.scrap, String);
     text('x', hud.x, (v) => v.toFixed(1));
     text('y', hud.y, (v) => v.toFixed(1));
     text('alive', hud.alive, String);

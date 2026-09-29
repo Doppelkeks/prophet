@@ -27,6 +27,8 @@ export const MAX_RANGE = 16383;
  * @property {number} interval attack cadence in ticks (1..255)
  * @property {number} [knockback] resistance (0..255)
  * @property {number} [flags]
+ * @property {number} [dropChance] Q16 chance of dropping scrap on death (65536 = always)
+ * @property {number} [dropValue] scrap units in the drop (0..32767)
  */
 
 export class SwarmTables {
@@ -51,7 +53,10 @@ export class SwarmTables {
       t[at + TY.ARMOR] = u.armor ?? 0;
       t[at + TY.TIMING] = u.interval | ((u.knockback ?? 0) << 8);
       t[at + TY.FLAGS] = u.flags ?? 0;
-      t[at + TY.DROP] = 0;
+      const chance = u.dropChance ?? 0;
+      const value = u.dropValue ?? 0;
+      if (!(chance >= 0 && chance <= 65536 && value >= 0 && value <= 32767)) throw new Error(`swarm type ${k}: drop chance must be 0..65536 (Q16) and drop value 0..32767`);
+      t[at + TY.DROP] = chance | (value << 17); // chance in 17 bits (65536 = always), value above
     }
     return t;
   }
@@ -72,6 +77,8 @@ export class SwarmInbound {
     this.proxies = 0;
     this.requests = 0;
     this.flags = 0;
+    /** Scrap value the CPU puts back on the ground this tick (after a swarm reset). */
+    this.scrapIn = 0;
     /** Records beyond a cap, dropped in submission order (reported as not fired / rejected). */
     this.dropped = 0;
   }
@@ -79,7 +86,7 @@ export class SwarmInbound {
   /** Starts a new tick. */
   reset() {
     this.block.fill(0);
-    this.groups = this.fires = this.proxies = this.requests = this.flags = this.dropped = 0;
+    this.groups = this.fires = this.proxies = this.requests = this.flags = this.scrapIn = this.dropped = 0;
   }
 
   /**
@@ -137,8 +144,9 @@ export class SwarmInbound {
   }
 
   /**
-   * An actor proxy. Proxy 0 is the one swarm units chase in v0.
-   * @param {{ entity: number, x: number, y: number, radius: number, team: number, kind?: number, flags?: number, hp?: number }} p
+   * An actor proxy. Proxy 0 is the one swarm units chase in v0. `aux` is the magnet radius (Q10) of a
+   * collector: pickups inside it fly to the proxy, and are collected on touching it.
+   * @param {{ entity: number, x: number, y: number, radius: number, team: number, kind?: number, flags?: number, hp?: number, aux?: number }} p
    * @returns {number} proxy index, or -1 when the cap is reached
    */
   proxy(p) {
@@ -147,6 +155,8 @@ export class SwarmInbound {
       this.dropped++;
       return -1;
     }
+    const aux = p.aux ?? 0;
+    if (aux < 0 || aux > MAX_RANGE) throw new Error('swarm: a proxy magnet radius must be 0..16 m');
     const at = L.inProxies + this.proxies * PROXY_WORDS;
     const b = this.block;
     b[at] = p.entity;
@@ -155,7 +165,19 @@ export class SwarmInbound {
     b[at + 3] = p.radius;
     b[at + 4] = (p.team & 0xff) | ((p.kind ?? 0) << 8) | ((p.flags ?? 0) << 16);
     b[at + 5] = p.hp ?? 0;
+    b[at + 6] = aux;
+    b[at + 7] = 0;
     return this.proxies++;
+  }
+
+  /**
+   * Puts scrap back on the ground: the value joins the swarm's scrap carry and comes back as one merged
+   * gem near proxy 0 (the economy's refund after a swarm reset).
+   * @param {number} value scrap units
+   */
+  depositScrap(value) {
+    if (!(value >= 0 && value <= 0x3fffffff)) throw new Error('swarm: scrap deposit out of range');
+    this.scrapIn += value;
   }
 
   /** Requests a swarm reset this tick (device loss). */
@@ -172,6 +194,7 @@ export class SwarmInbound {
     b[IH.PROXIES] = this.proxies;
     b[IH.REQUESTS] = this.requests;
     b[IH.FLAGS] = this.flags;
+    b[IH.SCRAP_IN] = this.scrapIn;
     return b;
   }
 }
@@ -209,6 +232,21 @@ export class SwarmOutbound {
   get contactHits() {
     return this.block[OH.CONTACT_HITS];
   }
+  /** Scrap value dropped by this tick's deaths. */
+  get scrapDropped() {
+    return this.block[OH.SCRAP_DROPPED];
+  }
+  /** Scrap value collected by every collector this tick. */
+  get scrapCollected() {
+    return this.block[OH.SCRAP_COLLECTED];
+  }
+  get pickupsAlive() {
+    return this.block[OH.PICKUPS_ALIVE];
+  }
+  /** Scrap value waiting for a free pickup slot (drops that found none, deposits). */
+  get scrapCarry() {
+    return this.block[OH.SCRAP_CARRY];
+  }
 
   /** @param {number} type */
   killsOfType(type) {
@@ -223,6 +261,11 @@ export class SwarmOutbound {
   /** Damage (Q8) dealt to proxy `p` this tick. @param {number} p */
   proxyDamage(p) {
     return this.block[this.layout.L.oProxyDmg + p];
+  }
+
+  /** Scrap value collected by proxy `p` this tick. @param {number} p */
+  proxyScrap(p) {
+    return this.block[this.layout.L.oProxyScrap + p];
   }
 
   /** Whether fire command `k` found a target. @param {number} k */
@@ -241,10 +284,16 @@ export class SwarmKeys {
   static SPAWN_ANGLE = 1;
   static SPAWN_RADIUS = 2;
   static PHASE = 3;
+  static DROP = 4;
 
   /** @param {number} seed @param {(seed: number, stream: number) => number} key */
   static of(seed, key) {
-    return { keySpawnA: key(seed, SwarmKeys.SPAWN_ANGLE), keySpawnR: key(seed, SwarmKeys.SPAWN_RADIUS), keyPhase: key(seed, SwarmKeys.PHASE) };
+    return {
+      keySpawnA: key(seed, SwarmKeys.SPAWN_ANGLE),
+      keySpawnR: key(seed, SwarmKeys.SPAWN_RADIUS),
+      keyPhase: key(seed, SwarmKeys.PHASE),
+      keyDrop: key(seed, SwarmKeys.DROP),
+    };
   }
 }
 

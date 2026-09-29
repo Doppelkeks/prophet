@@ -1,5 +1,5 @@
-// The per-frame uniform and the palette, shared by the scene passes (engine/render/renderer.js writes them;
-// field order must match Renderer.FRAME_FIELDS). Render code: floats are fine.
+// The per-frame uniform and the palette, shared by the scene passes (engine/render/renderer.js writes them
+// in this field order). Render code: floats are fine.
 
 struct Frame {
   iw: f32, ih: f32, halfW: f32, halfH: f32,      // internal size; the snapped camera sits at pixel (halfW, halfH)
@@ -8,12 +8,13 @@ struct Frame {
   uPosX: u32, uPosY: u32, uVel: u32, uInfo: u32, // swarm unit columns (words into U)
   pPosX: u32, pPosY: u32, pVel: u32, pInfo: u32, // shot columns (words into P)
   unitCap: u32, shotCap: u32, actorCount: u32, groundColors: u32, // ground: a | b << 8 | edge << 16 | outside << 24
+  kPosX: u32, kPosY: u32, kInfo: u32, pickCap: u32, // pickup columns (words into P)
 }
 
 struct Styles {
   palette: array<vec4f, 32>,
   // Box styles: w, d, h in px, then top | front << 8 | z px << 16 (colors are palette indices).
-  // UNIT_STYLES + swarm type, ACTOR_STYLES + actor style, SHOT_STYLE.
+  // UNIT_STYLES + swarm type, ACTOR_STYLES + actor style, SHOT_STYLE, PICKUP_STYLE.
   styles: array<vec4u, STYLE_COUNT>,
 }
 

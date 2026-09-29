@@ -24,8 +24,10 @@ const SCENES = {
       i.spawnRing({ type: 1, count: 300, cx: 5 * M, cy: -5 * M, r0: 0, r1: 1536 }); // a dense crowd
     }
     if (t % 25 === 0) i.spawnRing({ type: (t / 25) % 3, count: 180, cx: px, cy: py, r0: 10 * M, r1: 20 * M });
-    i.proxy({ entity: 1, x: px, y: py, radius: 512, team: Team.PLAYER, flags: ProxyFlag.PUSHES | ProxyFlag.TARGETABLE });
-    i.proxy({ entity: 2, x: -px, y: 3 * M, radius: 700, team: Team.PLAYER, flags: 0 });
+    // Two collectors with overlapping magnets: every gem goes to the nearer one.
+    i.proxy({ entity: 1, x: px, y: py, radius: 512, team: Team.PLAYER, flags: ProxyFlag.PUSHES | ProxyFlag.TARGETABLE | ProxyFlag.COLLECTOR, aux: 5 * M });
+    i.proxy({ entity: 2, x: -px, y: 3 * M, radius: 700, team: Team.PLAYER, flags: ProxyFlag.COLLECTOR, aux: 3 * M });
+    if (t === 150) i.depositScrap(9);
     for (let f = 0; f < 12; f++) {
       i.fire({ source: f, x: px + (f - 6) * 300, y: py, range: (8 + (f % 6)) * M, damage: 300 + f * 50, speed: 500 + f * 20, life: 40, pierce: f % 3 });
     }
@@ -35,7 +37,7 @@ const SCENES = {
     if (t === 0) {
       for (let g = 0; g < 50; g++) i.spawnRing({ type: g % 3, count: 2000, cx: ((g % 10) - 5) * 10 * M, cy: (Math.floor(g / 10) - 2) * 10 * M, r0: 0, r1: 8 * M });
     }
-    i.proxy({ entity: 1, x: 0, y: 0, radius: 512, team: Team.PLAYER, flags: ProxyFlag.PUSHES });
+    i.proxy({ entity: 1, x: 0, y: 0, radius: 512, team: Team.PLAYER, flags: ProxyFlag.PUSHES | ProxyFlag.COLLECTOR, aux: 6 * M });
     for (let f = 0; f < 64; f++) i.fire({ source: f, x: (f - 32) * M, y: 0, range: 12 * M, damage: 400, speed: 600, life: 30, pierce: 1 });
   },
 };
@@ -61,10 +63,14 @@ function compare(g, r, layout) {
   const field = (/** @type {string[]} */ names, /** @type {number} */ cap, /** @type {number} */ k) => `${names[Math.floor(k / cap)]}[${k % cap}]`;
   const unitFields = ['posX', 'posY', 'vel', 'altGen', 'hp', 'info', 'st0', 'st1'];
   const shotFields = ['posX', 'posY', 'vel', 'dmg', 'info', 'meta', 'lastHit', 'source'];
+  const pickFields = ['pickup.posX', 'pickup.posY', 'pickup.value', 'pickup.info'];
   let k = firstDiff(g.U, r.U, 0, layout.words.U);
   if (k >= 0) return { buffer: 'U', at: field(unitFields, c.units, k), gpu: g.U[k], ref: r.U[k] };
   k = firstDiff(g.P, r.P, 0, layout.words.P);
-  if (k >= 0) return { buffer: 'P', at: field(shotFields, c.shots, k), gpu: g.P[k], ref: r.P[k] };
+  if (k >= 0) {
+    const at = k < L.kPosX ? field(shotFields, c.shots, k) : field(pickFields, c.pickups, k - L.kPosX);
+    return { buffer: 'P', at, gpu: g.P[k], ref: r.P[k] };
+  }
   k = firstDiff(g.O, r.O, 0, layout.words.O);
   if (k >= 0) return { buffer: 'O', at: `O[${k}]`, gpu: g.O[k], ref: r.O[k] };
   const ranges = [
@@ -73,9 +79,12 @@ function compare(g, r, layout) {
     ['binSumX', L.aBinSumX, L.aBinSumX + L.cells],
     ['binSumY', L.aBinSumY, L.aBinSumY + L.cells],
     ['binStart', L.aBinStart, L.aBinStart + L.cells],
-    ['misc', L.aMisc, L.aMisc + 2],
+    ['misc', L.aMisc, L.aMisc + 5],
     ['unitFree', L.aUnitFree, L.aUnitFree + r.A[L.aMisc]],
     ['shotFree', L.aShotFree, L.aShotFree + r.A[L.aMisc + 1]],
+    ['pickFree', L.aPickFree, L.aPickFree + r.A[L.aMisc + 2]],
+    ['dropList', L.aDropReq, L.aDropReq + r.A[L.aMisc + 3]],
+    ['drops', L.aDrop, L.aDrop + c.units],
     ['requests', L.aReq, L.aReq + c.fires * 8],
   ];
   for (const [name, from, to] of /** @type {[string, number, number][]} */ (ranges)) {
@@ -111,6 +120,9 @@ async function runSwarm(cfg) {
   let prevRef = refState(ref);
   let kills = 0;
   let maxAlive = 0;
+  let scrapDropped = 0;
+  let scrapCollected = 0;
+  let maxCarry = 0;
   let gpuMs = 0;
   let refMs = 0;
   /** @type {Map<number, Int32Array>} reference outbound blocks waiting for their GPU twin */
@@ -134,6 +146,9 @@ async function runSwarm(cfg) {
     const out = new SwarmOutbound(layout, refBlock);
     kills += out.kills;
     maxAlive = Math.max(maxAlive, out.unitsAlive);
+    scrapDropped += out.scrapDropped;
+    scrapCollected += out.scrapCollected;
+    maxCarry = Math.max(maxCarry, out.scrapCarry);
     if (errors.length) return { ok: false, tick: t, errors };
     if (g) {
       const diff = compare(g, refState(ref), layout);
@@ -154,7 +169,7 @@ async function runSwarm(cfg) {
   }
   swarm.destroy();
   if (refBlocks.size || blockMismatches.count) return { ok: false, missingBlocks: refBlocks.size, blockMismatches };
-  return { ok: true, ticks: cfg.ticks, kills, maxAlive, hash: ref.hash(), compileMs, gpuMs, refMs, errors };
+  return { ok: true, ticks: cfg.ticks, kills, maxAlive, scrapDropped, scrapCollected, maxCarry, hash: ref.hash(), compileMs, gpuMs, refMs, errors };
 }
 
 /**

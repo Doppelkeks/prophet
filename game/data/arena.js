@@ -8,3 +8,5 @@ export const ARENA_HALF = Units.q10(64);
 export const PATCH_SPEED = Units.q10PerTick(6.5);
 /** PATCH's body radius for the swarm (push and contact): 0.5 m. */
 export const PATCH_RADIUS = Units.q10(0.5);
+/** PATCH's pickup (magnet) radius: scrap gems inside it fly to PATCH. 3 m before parts and chips. */
+export const PATCH_MAGNET = Units.q10(3);

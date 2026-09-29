@@ -264,14 +264,15 @@ The first implementation (M2) runs a subset of the chain, with the same determin
 | | Passes and features |
 |---|---|
 | **In v0** | Free-slot scan, shot spawn (projectiles), unit spawn, bins, steering, integrate, projectiles, resolve, contact, targeting (`nearest` only), outbound copy |
-| **Later** | Subgroup scans (v0 uses the workgroup-memory scan), area effects, statuses, pickups, events and flow fields; also the other target policies, chains, and the density and threat maps |
+| **Added in M2** | Pickups: drops, magnet, collection, the scrap carry ([below](#pickups-in-m2)) |
+| **Later** | Subgroup scans (v0 uses the workgroup-memory scan), area effects, statuses, events and flow fields; also the other target policies, chains, and the density and threat maps |
 
 - v0 dispatches over each pool's **capacity**. Indirect dispatch by high-water mark ([buffers](#buffers)) comes later.
 - Spawn groups already carry their CPU-computed request prefix ([slot allocation](#deterministic-slot-allocation)).
 
 **v0 implementation notes.** The layout lives in `engine/swarm/swarm-layout.js`, the contract in `swarm-contract.js`, and the reference in `engine/swarm/reference/`, one class per pass.
 - **Buffers.** v0 binds six storage buffers: `U` (units), `P` (shots), `A` (accumulators, bins, free lists, scan scratch, shot requests), `I` (a ring of inbound blocks, one per tick encoded in a frame), `O` (the outbound block) and `T` (sine and type tables). It also binds the `Layout` uniform of word offsets, generated from the same field list as the JS layout, and a per-tick parameter uniform. `G` arrives with flow fields. The bin grid is centered on the origin unless configured otherwise, and must cover the arena.
-- **Pass order.** Clear, free-slot scan, shot spawn, unit spawn, bin count, bin scan, bin scatter, steer, integrate, projectiles, resolve, contact, targeting, finalize, then the copy of `O` into the readback slot.
+- **Pass order.** Clear, free-slot scan, shot spawn, pickup spawn, unit spawn, bin count, bin scan, bin scatter, steer, integrate, projectiles, resolve, contact, targeting, pickups, finalize, then the copy of `O` into the readback slot.
 - **Steering.** Every unit chases proxy 0 (there are no flow fields yet): the seek velocity is the direction to it, scaled to the type's speed by an integer length (`isqrt`, after halving both components until they fit 14 bits). The velocity moves a quarter of the way toward the seek velocity each tick and snaps to it within 4 units, so it settles exactly. Separation:
   - Pairwise linear repulsion runs against the members of 3×3 neighbour cells holding at most the pairwise cap. Coincident units split along x by slot order.
   - A denser cell acts as one neighbour at its centroid, weighted by the cap.
@@ -281,6 +282,9 @@ The first implementation (M2) runs a subset of the chain, with the same determin
 - **Projectiles.** Shots skip their last hit (the slot only, in v0). Kill credit is `(min(damage >> 8, 0x7FFE) + 1) << 16 | source`, so every hit credits a source. Fire request *k* takes free shot slot *k*, which leaves the slot of a command without a target unused for that tick.
 - **Contact.** Contact damage lands when `(tick + anim phase) mod attack interval = 0`. The phase is drawn from the RNG at spawn.
 - **Contract in v0.** Fire commands carry the shot's speed, lifetime and pierce directly; the pattern table comes later. The CPU systems that write swarm commands run serially on the engine worker, in system order, straight into the tick's inbound block; command-buffer segments for them come with parallel producers. The outbound block holds a header (tick, alive counts, rejections, kills, shots fired, contact hits), kills per type and per source, per-proxy damage, and one fire-result bit per command. Events and maps come later.
+- **Contract today.**
+  - Actor proxies are 32 B. Word 6 is `aux`, a collector's magnet radius.
+  - The inbound header carries `SCRAP_IN`, a scrap deposit from the CPU.
 - **GPU backend.** The GPU backend is `engine/swarm/swarm.js`.
   - The WGSL kernels live in `engine/swarm/kernels/`, one file per pass. They include `swarm-common.wgsl` for bindings and helpers. A kernel that needs atomics on `A` or `O` sets `#define A_ATOMIC` / `O_ATOMIC` first; another pass may declare the same buffer as plain `array<i32>`.
   - The `Layout` struct and every shared constant are generated from `swarm-layout.js` and prepended to each kernel, so the JS and WGSL numbers can't drift apart.
@@ -292,17 +296,43 @@ The first implementation (M2) runs a subset of the chain, with the same determin
   - In `tests/browser/swarm.spec.js`, the GPU must equal the reference on **every tick**: at 2,000 units × 300 ticks for workgroup sizes 32, 64 and 128, and at 100,000 units × 5 ticks. Every outbound block must come back through the readback ring in order.
   - On a mismatch, the test replays the tick pass by pass from the last matching state (`Swarm.runTick` with a pass count, `readState`/`writeState`, the reference's `afterPass` hook) and names the first divergent kernel.
 
+### Pickups in M2
+
+Scrap gems follow the determinism rules of the rest of the chain.
+
+**The record.** A pickup is 16 B in `P`, after the projectiles: position x, y; value; `kind | flags << 8 | age << 16`. Pools are sized per tier: [caps](../BUDGETS.md#entity-caps).
+
+**Drops.**
+1. In resolve, a death rolls `rand(DROP, tick, slot)` against the type's drop chance. The type table packs the chance (Q16, 65536 means always) and the value into `TY.DROP`.
+2. A drop writes its value into the unit's `aDrop` word and adds it to the outbound `scrapDropped`.
+3. Next tick, the free-slot scan also lists the dropping units in slot order (scan `MODE` 4) and the free pickup slots (`MODE` 3). The pickup spawn pass gives drop *k* free pickup slot *k*, at the dead unit's last position. This pass runs before unit spawn, which may reuse that unit's slot.
+
+**Collection.**
+- The pickups pass finds, for each gem, the nearest collector proxy whose magnet radius (`aux`) holds it. Ties go to the lower proxy index.
+- Within the collector's radius plus 0.25 m, the gem is collected. Its value is added to that proxy's outbound scrap and to `scrapCollected`, both exact.
+- Otherwise it moves toward the collector at 12 m/s, which is faster than PATCH.
+- Gems never expire.
+
+**The scrap carry.** This is the M2 form of the merge rule, and it keeps scrap from ever being lost.
+- A drop that finds no free pickup slot adds its value to a persistent carry word in `A`.
+- The CPU's `SCRAP_IN` deposit adds to the carry too.
+- When a slot is free after the tick's drops, the whole carry comes back as **one merged gem** 2 m north of proxy 0.
+- The outbound `scrapCarry` reports the carry, so this invariant holds every tick: dropped = collected + on the ground + carried + pending drops. Tests check it.
+- The fuller rule, folding the gems nearest PATCH together at the cap ([above](#pass-chain)), comes later.
+
+**After a swarm reset** the pools start empty. On the reset tick, SCRAPWAKE deposits the scrap it knew was outstanding (`scrapDropped − scrap` from the applied blocks), and it comes back as a merged gem near PATCH. Drops and pickups inside the discarded ticks are lost.
+
 ## CPU-GPU contract
 
 ### Inbound, every tick (CPU → GPU)
 
 | Stream | Record | Cap | Ordering rule |
 |---|---|---|---|
-| Header | 16 B: tick; spawn, effect, fire and proxy counts; flags (swarm reset, field swap) | 1 | — |
+| Header | 16 words today (16 B planned): tick; spawn, effect, fire and proxy counts; flags (swarm reset, field swap); scrap deposit | 1 | — |
 | Spawn groups | 32 B: type, target mode, shape (point, ring, edge), flags, count, request prefix (computed on the CPU), HP scale, center x/y, radii | Bounded by free slots | Command-buffer key order; the request prefix follows it |
 | Area effects | 32 B: shape (circle, cone, capsule, ring), team, status and tier, center x/y, size and angle, damage Q8, impulse Q10, source | [Per tick](../BUDGETS.md#entity-caps) | Command-buffer key order; cap applied after the merge |
 | Fire commands | 32 B: source entity, source proxy, pattern, policy, pierce, status and tier, flags, aim angle, bounces, range Q10, damage Q8, origin x/y | [Per tick](../BUDGETS.md#entity-caps) | Command-buffer key order; cap applied after the merge |
-| Actor proxies | 24 B: entity, x/y, radius, aux (magnet radius for collectors), team, kind, flags (targetable, blocks units, collector, marked), HP Q8 | [Per tick](../BUDGETS.md#entity-caps) | Ascending entity handle |
+| Actor proxies | 32 B: entity, x/y, radius, team, kind, flags (targetable, blocks units, collector, marked), HP Q8, aux (magnet radius for collectors), one spare word | [Per tick](../BUDGETS.md#entity-caps) | Ascending entity handle |
 
 - Every inbound list except proxies is written through command-buffer segments and merged in (system ID, chunk index, row, sequence) order ([02](02-core-ecs-jobs.md#command-buffers-and-events)). Records beyond a cap are dropped in that order and reported as "not fired" at *T+K*, exactly like a no-target result.
 - One `PostSim` system writes the proxies in ascending entity order, so proxy indices are deterministic. It also fills in each fire command's source proxy index. The CPU keeps each tick's proxy and command tables until *T+K* to map indices back to entities, and ignores entities that died in the meantime.

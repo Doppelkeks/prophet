@@ -117,9 +117,10 @@ npm run replay -- f.json  # replay an exported run in Node on the JS reference s
 **The tech demo** (`npm run dev`, then open the page):
 - Move PATCH with WASD, the arrow keys or a gamepad's d-pad and left stick. PATCH fires on its own.
 - Swarm rings spawn around PATCH and chase it.
+- Kills drop amber scrap gems. They fly to PATCH within 3 m, and the HUD counts the scrap.
 - `=` and `-` raise and lower the director's stress; `]` spawns a burst ring.
 - URL options:
-  - `?units=&shots=` override the swarm pools.
+  - `?units=&shots=&pickups=` override the swarm pools.
   - `?swarm=cpu` runs the JS reference swarm.
   - `?threading=`, `?driver=`, `?perf=` force a tier.
 - `window.__px.exportReplay()` returns the run so far; `npm run replay` checks that it replays identically.

@@ -142,6 +142,7 @@ export class MainHost {
         swarm: this.params.get('swarm'),
         units: num('units'),
         shots: num('shots'),
+        pickups: num('pickups'),
       },
       { transfer: [offscreen] },
     );

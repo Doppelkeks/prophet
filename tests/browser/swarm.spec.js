@@ -25,10 +25,22 @@ for (const wg of [32, 64, 128]) {
     test.info().annotations.push({ type: 'result', description: JSON.stringify(r) });
     expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
     expect(r.kills).toBeGreaterThan(0);
+    expect(r.scrapCollected).toBeGreaterThan(0); // drops, merged gems and magnets ran on both sides
     expect(r.errors).toEqual([]);
     expect(errors).toEqual([]);
   });
 }
+
+test('GPU equals reference when drops overflow a 16-slot pickup pool (the scrap carry and merged gems)', async ({ page }) => {
+  test.setTimeout(240_000);
+  const errors = await open(page);
+  const r = await page.evaluate((cfg) => /** @type {any} */ (window).runSwarm(cfg), { scene: 'mixed', caps: { ...SMALL, pickups: 16 }, ticks: 300, wg: 64, seed: 3 });
+  test.info().annotations.push({ type: 'result', description: JSON.stringify(r) });
+  expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
+  expect(r.maxCarry).toBeGreaterThan(0); // drops found no free slot and waited in the carry
+  expect(r.scrapCollected).toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});
 
 test('GPU equals reference at 100k units × 5 ticks', async ({ page }) => {
   test.setTimeout(300_000);

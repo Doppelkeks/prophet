@@ -12,7 +12,7 @@ test('the production build boots from dist/web with hashed bundles, inlined shad
   page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
   page.on('request', (r) => paths.push(new URL(r.url()).pathname));
   const base = `http://127.0.0.1:${PORTS.prod}`;
-  await page.goto(`${base}/index.html?units=4096&shots=1024`);
+  await page.goto(`${base}/index.html?units=4096&shots=1024&pickups=512`);
   await page.waitForFunction(() => window.__px?.status !== 'booting' && !!window.__px?.hud && window.__px.frames > 2, null, { timeout: 60_000 });
   const px = await page.evaluate(() => window.__px);
   expect(px?.error ?? null).toBeNull();

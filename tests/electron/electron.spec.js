@@ -10,7 +10,7 @@ test('Electron shell: app:// origin, cross-origin isolated, WebGPU adapter, fram
     cwd: root,
     // --no-sandbox: CI containers run as root (tests only; the shipped app keeps the sandbox).
     // Small swarm pools keep SwiftShader fast (tests/browser/swarm.spec.js covers large scales).
-    args: ['--no-sandbox', root, `--px-root=${pxRoot}`, '--px-query=units=4096&shots=1024'],
+    args: ['--no-sandbox', root, `--px-root=${pxRoot}`, '--px-query=units=4096&shots=1024&pickups=512'],
     env: { ...process.env, PX_GPU_SWITCHES: process.env.PX_GPU_SWITCHES ?? 'swiftshader' },
   });
   try {

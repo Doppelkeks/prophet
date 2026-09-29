@@ -22,6 +22,7 @@ export const EngineCommand = Object.freeze({
  * @property {number} tick the running tick
  * @property {SwarmInbound | null} swarm this tick's inbound swarm block (spawns, fire commands, proxies)
  * @property {SwarmOutbound | null} swarmOut the swarm's report of tick − K, applied this tick
+ * @property {boolean} swarmReset the swarm resets on this tick (after a device loss): its pools start empty
  */
 
 /**
@@ -60,6 +61,7 @@ export class SimCore {
     this.resources.tick = 0;
     this.resources.swarm = this.swarm ? new SwarmInbound(this.swarm.backend.layout) : null;
     this.resources.swarmOut = null;
+    this.resources.swarmReset = false;
     /** Swarm blocks of ticks in [emptyFrom, emptyUntil) were discarded by a swarm reset. */
     this.emptyFrom = 0;
     this.emptyUntil = 0;
@@ -141,6 +143,7 @@ export class SimCore {
         this.emptyUntil = t;
         this.resets++;
       }
+      res.swarmReset = reset;
       if (t >= swarm.K) {
         const b = t - swarm.K;
         let block = null;

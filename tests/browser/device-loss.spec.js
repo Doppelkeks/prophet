@@ -8,7 +8,7 @@ import { EngineCommand } from '../../engine/app/sim-core.js';
 import { UI_WORDS } from '../../engine/input/command-log.js';
 import { SCRAPWAKE } from '../../game/app/game.js';
 
-const POOLS = 'units=4096&shots=1024';
+const POOLS = 'units=4096&shots=1024&pickups=512';
 
 test('recovers from a device loss mid-run, and the replay with its swarm reset matches in Node', async ({ page }) => {
   test.setTimeout(180_000);

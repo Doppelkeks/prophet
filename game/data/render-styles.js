@@ -23,6 +23,7 @@ export const RENDER_STYLE = {
     { w: 6, d: 4, h: 6, z: 14, top: 'concrete-400', front: 'sodium-500' }, // PATCH: head, the optic facing the camera
   ],
   shot: { w: 2, d: 1, h: 1, z: 8, top: 'sodium-500', front: 'amber-400' },
+  pickup: { w: 2, d: 2, h: 2, z: 1, top: 'amber-400', front: 'rust-700' }, // scrap gems: amber (docs/game/03-art-audio.md#palette)
   arenaHalf: ARENA_HALF / Units.q10(1),
   lift: 1,
 };

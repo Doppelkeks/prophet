@@ -72,6 +72,7 @@ export const SCRAPWAKE = {
     hud.set(I.patchY, world.get(patch, Transform.y));
     hud.set(I.hp, world.get(patch, Health.hp));
     hud.set(I.hpMax, world.get(patch, Health.max));
+    hud.set(I.scrap, world.get(run, RunStats.scrap));
     hud.set(I.kills, world.get(run, RunStats.kills));
     hud.set(I.alive, world.get(run, RunStats.alive));
     hud.set(I.shots, world.get(run, RunStats.shots));

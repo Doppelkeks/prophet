@@ -8,7 +8,7 @@ import { SCRAPWAKE } from '../../game/app/game.js';
 import { UiCommand } from '../../game/data/ui-commands.js';
 import { UI_WORDS } from '../../engine/input/command-log.js';
 
-const POOLS = 'units=4096&shots=1024';
+const POOLS = 'units=4096&shots=1024&pickups=512';
 
 /**
  * @param {import('@playwright/test').Page} page

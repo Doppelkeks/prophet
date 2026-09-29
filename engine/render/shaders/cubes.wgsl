@@ -1,7 +1,7 @@
 // Vertex-pulled boxes (docs/engine/04-pixel-art-pipeline.md#projection): each instance draws its top and its
 // camera-facing front as two quads, 12 vertices, snapped to whole internal pixels. SOURCE picks the instance
 // data: 0 swarm units (U), 1 shots (P), 2 actors (the game's extract: ACTOR_WORDS per actor, x y z vx vy in
-// Q10, then its style). Dead slots and instances outside the view collapse to a point.
+// Q10, then its style), 3 pickups (P). Dead slots and instances outside the view collapse to a point.
 #include "frame.wgsl"
 
 override SOURCE: u32 = 0u;
@@ -51,6 +51,13 @@ fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) n: u32) -> VOut {
     y = f32(bitcast<i32>(P[F.pPosY + n])) - hi16(vel) * back;
     z = 0.0;
     style = S.styles[SHOT_STYLE];
+  } else if (SOURCE == 3u) {
+    let info = P[F.kInfo + n];
+    if ((info & PICK_ALIVE) == 0u) { return hidden(); }
+    x = f32(bitcast<i32>(P[F.kPosX + n])); // gems move only in steps toward a collector: no interpolation
+    y = f32(bitcast<i32>(P[F.kPosY + n]));
+    z = 0.0;
+    style = S.styles[PICKUP_STYLE];
   } else {
     let r = n * ACTOR_WORDS;
     x = f32(A[r]) - f32(A[r + 3u]) * back;

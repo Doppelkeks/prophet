@@ -8,6 +8,7 @@ export const HUD = new StateSchema({
   patchX: 'i32', // Q10 m
   patchY: 'i32', // Q10 m
   hp: 'i32', // Q8
+  scrap: 'u32',
   hpMax: 'i32', // Q8
   kills: 'u32',
   alive: 'u32', // swarm units alive (reported at T − K)

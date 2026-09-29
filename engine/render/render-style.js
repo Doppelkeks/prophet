@@ -18,6 +18,7 @@ export const ACTOR_WORDS = 8;
  * @property {BoxStyle[]} units per swarm type (at most 16)
  * @property {BoxStyle[]} actors actor styles (at most 16), picked by the actor record's style word
  * @property {BoxStyle} shot
+ * @property {BoxStyle} pickup scrap gems
  * @property {number} arenaHalf meters
  * @property {number} [lift] meters above the followed actor that the camera centers on
  * @property {number} [maxActors] actor records per frame (default 64)

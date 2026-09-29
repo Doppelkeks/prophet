@@ -18,7 +18,7 @@ export class SwarmBuffers {
   /**
    * @param {import('../swarm-layout.js').SwarmLayout} layout
    * @param {Int32Array} tables the T buffer (SwarmTables.build)
-   * @param {{ keySpawnA: number, keySpawnR: number, keyPhase: number }} keys
+   * @param {{ keySpawnA: number, keySpawnR: number, keyPhase: number, keyDrop: number }} keys
    */
   constructor(layout, tables, keys) {
     const w = layout.words;

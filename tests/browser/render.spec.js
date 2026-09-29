@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 /** Small swarm pools keep SwiftShader fast; swarm.spec.js covers the large scales. */
-const POOLS = 'units=4096&shots=1024';
+const POOLS = 'units=4096&shots=1024&pickups=512';
 
 /**
  * @param {import('@playwright/test').Page} page
@@ -57,6 +57,7 @@ async function look(page) {
       orangeCenter: count(palette['sodium-500'], cx - 16, cy - 24, cx + 16, cy + 16),
       orange: count(palette['sodium-500']),
       cyan: count(palette['cyan-400']),
+      amber: count(palette['amber-400']),
       groundA: count(palette['night-800']),
       groundB: count(palette['night-700']),
       png: Array.from(png),
@@ -80,6 +81,8 @@ test('renders PATCH at the center and the swarm in cyan, and the camera follows 
   expect(a.cyan).toBeGreaterThan(20);
   expect(a.groundA).toBeGreaterThan(1000);
   expect(a.groundB).toBeGreaterThan(1000);
+  // Kills drop scrap: amber gems appear on the ground (PATCH's magnet pulls in only the near ones).
+  await expect.poll(async () => (await look(page)).amber, { timeout: 30_000 }).toBeGreaterThan(0);
 
   // Drive east for 4 m: the camera follows, PATCH stays at the center.
   const x0 = /** @type {number} */ (a.hud?.patchX);

@@ -3,8 +3,9 @@ import { System } from '../../../engine/ecs/system.js';
 import { Health, RunStats } from '../../components/index.js';
 
 /**
- * Applies the swarm's report of tick T − K: contact damage to PATCH (proxy 0) and the run totals.
- * Runs first in the tick, on the engine thread.
+ * Applies the swarm's report of tick T − K: contact damage to PATCH (proxy 0), the scrap it collected,
+ * and the run totals. On a swarm reset it puts the scrap that was lying on the ground back, as one gem
+ * near PATCH (docs/engine/05-gpu-swarm.md#resets-and-device-loss). Runs first in the tick, on the engine thread.
  */
 export class SwarmFeedbackSystem extends System {
   static key = 'swarm-feedback';
@@ -14,11 +15,15 @@ export class SwarmFeedbackSystem extends System {
   /** @type {System['update']} */
   update(cmd) {
     const res = this.ecs.resources;
-    const out = res.swarmOut;
-    if (!out) return;
     const reader = this.ecs.reader;
     const run = res.run;
     const patch = res.patch;
+    if (res.swarmReset && res.swarm) {
+      const outstanding = reader.get(run, RunStats.scrapDropped) - reader.get(run, RunStats.scrap);
+      if (outstanding > 0) res.swarm.depositScrap(outstanding);
+    }
+    const out = res.swarmOut;
+    if (!out) return;
     const damage = out.proxyDamage(0);
     let hp = reader.get(patch, Health.hp) - damage;
     let downs = reader.get(run, RunStats.downs);
@@ -34,5 +39,7 @@ export class SwarmFeedbackSystem extends System {
     cmd.set(run, RunStats.damage, reader.get(run, RunStats.damage) + damage);
     cmd.set(run, RunStats.alive, out.unitsAlive);
     cmd.set(run, RunStats.shots, out.shotsAlive);
+    cmd.set(run, RunStats.scrap, reader.get(run, RunStats.scrap) + out.proxyScrap(0));
+    cmd.set(run, RunStats.scrapDropped, reader.get(run, RunStats.scrapDropped) + out.scrapDropped);
   }
 }

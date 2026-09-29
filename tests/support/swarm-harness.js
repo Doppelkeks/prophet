@@ -2,15 +2,15 @@
 // Helpers for swarm tests: a reference swarm with a small layout, direct placement of units and shots
 // for precise scenes, and a tick driver that tracks the previous tick's fire count.
 import { SwarmInbound, SwarmOutbound, SwarmTables } from '../../engine/swarm/swarm-contract.js';
-import { NO_HIT, SHOT_ALIVE, SwarmLayout, UNIT_ALIVE } from '../../engine/swarm/swarm-layout.js';
+import { NO_HIT, PICK_ALIVE, SHOT_ALIVE, SwarmLayout, UNIT_ALIVE } from '../../engine/swarm/swarm-layout.js';
 import { SwarmReference } from '../../engine/swarm/reference/swarm-reference.js';
 import { SwarmMath } from '../../engine/swarm/reference/swarm-math.js';
 
-/** Test unit types: 0 grunt, 1 runner, 2 brute. Q10 m per tick, Q10 m, Q8 HP. */
+/** Test unit types: 0 grunt, 1 runner, 2 brute. Q10 m per tick, Q10 m, Q8 HP; drop chance Q16. */
 export const TEST_TYPES = [
-  { speed: 55, radius: 358, maxHp: 768, contact: 256, interval: 10 },
+  { speed: 55, radius: 358, maxHp: 768, contact: 256, interval: 10, dropChance: 32768, dropValue: 1 },
   { speed: 82, radius: 256, maxHp: 256, contact: 128, interval: 20 },
-  { speed: 34, radius: 614, maxHp: 3072, contact: 768, interval: 45 },
+  { speed: 34, radius: 614, maxHp: 3072, contact: 768, interval: 45, dropChance: 65536, dropValue: 5 },
 ];
 
 export class SwarmHarness {
@@ -19,7 +19,7 @@ export class SwarmHarness {
    * @param {{ seed?: number, shuffle?: number, delay?: (tick: number) => number, types?: import('../../engine/swarm/swarm-contract.js').UnitType[] }} [o]
    */
   constructor(caps = {}, o = {}) {
-    this.layout = new SwarmLayout({ units: 256, shots: 64, groups: 8, fires: 32, proxies: 4, gridW: 32, arenaHalf: 32 * 1024, ...caps });
+    this.layout = new SwarmLayout({ units: 256, shots: 64, pickups: 64, groups: 8, fires: 32, proxies: 4, gridW: 32, arenaHalf: 32 * 1024, ...caps });
     this.tables = SwarmTables.build(this.layout, o.types ?? TEST_TYPES);
     this.ref = new SwarmReference(this.layout, this.tables, { seed: o.seed ?? 1234, shuffle: o.shuffle, delay: o.delay });
     this.inbound = new SwarmInbound(this.layout);
@@ -93,6 +93,29 @@ export class SwarmHarness {
   /** @param {number} s */
   shotAlive(s) {
     return (this.ref.b.P[this.ref.b.L.pInfo + s] & SHOT_ALIVE) !== 0;
+  }
+
+  /** Live pickups as [slot, x, y, value]. */
+  pickups() {
+    const b = this.ref.b;
+    const L = b.L;
+    /** @type {[number, number, number, number][]} */
+    const out = [];
+    for (let s = 0; s < L.pickCap; s++) if (b.P[L.kInfo + s] & PICK_ALIVE) out.push([s, b.Pi[L.kPosX + s], b.Pi[L.kPosY + s], b.Pi[L.kValue + s]]);
+    return out;
+  }
+
+  /** Scrap dropped this tick that becomes pickups next tick. */
+  pendingDrops() {
+    const b = this.ref.b;
+    let v = 0;
+    for (let s = 0; s < b.L.unitCap; s++) v += b.A[b.L.aDrop + s];
+    return v;
+  }
+
+  /** Kills unit `s` in this tick's resolve (its damage accumulator). @param {number} s */
+  doom(s) {
+    this.ref.b.A[this.ref.b.L.aDmg + s] = 0x3fffffff;
   }
 
   /** Live units. */

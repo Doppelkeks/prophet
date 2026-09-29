@@ -4,7 +4,10 @@ import { Component } from '../../engine/ecs/component.js';
 /** Run totals, fed by the swarm's reports at T + K. One per run. */
 export class RunStats extends Component {
   static key = 'run-stats';
-  static schema = /** @type {const} */ ({ kills: 'i32', fired: 'i32', rejected: 'i32', damage: 'i32', downs: 'i32', alive: 'i32', shots: 'i32', waves: 'i32' });
+  static schema = /** @type {const} */ ({
+    kills: 'i32', fired: 'i32', rejected: 'i32', damage: 'i32', downs: 'i32', alive: 'i32', shots: 'i32', waves: 'i32',
+    scrap: 'i32', scrapDropped: 'i32',
+  });
   /** @type {number} */ static kills;
   /** @type {number} */ static fired;
   /** @type {number} */ static rejected;
@@ -13,6 +16,10 @@ export class RunStats extends Component {
   /** @type {number} */ static alive;
   /** @type {number} */ static shots;
   /** @type {number} */ static waves;
+  /** Scrap PATCH collected (exact: the swarm's per-proxy counter). */
+  /** @type {number} */ static scrap;
+  /** Scrap the swarm dropped; minus `scrap`, what lies on the ground (or waits in the swarm's carry). */
+  /** @type {number} */ static scrapDropped;
 }
 
 /** Wave pacing: a ring of `count` units every `every` ticks, growing by `growth` per wave, up to `cap` alive. */

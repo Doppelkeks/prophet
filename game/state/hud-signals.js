@@ -13,6 +13,7 @@ export const hud = {
   /** HP as a 0..1 ratio and as whole points. */
   hpRatio: new Signal(/** @type {number} */ (1), Signal.near(0.002)),
   hp: new Signal(0),
+  scrap: new Signal(0),
   kills: new Signal(0),
   alive: new Signal(0),
   shots: new Signal(0),
@@ -36,6 +37,7 @@ export function updateHud(r) {
   hud.y.value = Math.round((r.get(I.patchY) / 1024) * 10) / 10;
   hud.hpRatio.value = Math.max(0, Math.min(1, r.get(I.hp) / max));
   hud.hp.value = Math.ceil(r.get(I.hp) / 256);
+  hud.scrap.value = r.get(I.scrap);
   hud.kills.value = r.get(I.kills);
   hud.alive.value = r.get(I.alive);
   hud.shots.value = r.get(I.shots);

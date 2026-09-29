@@ -7,7 +7,9 @@ import { ReadbackRing } from '../gpu/readback-ring.js';
 import { PipelineCache } from '../gpu/pipeline-cache.js';
 import { WgslPreprocessor } from '../gpu/wgsl-preprocessor.js';
 import { ProxyFlag, SwarmKeys, Team } from './swarm-contract.js';
-import { IH, SwarmLayout } from './swarm-layout.js';
+import { IH, LAYOUT_FIELDS, SwarmLayout } from './swarm-layout.js';
+import { CARRY_OFFSET } from './reference/pickup-spawn.js';
+import { MAGNET_SPEED, PICKUP_RADIUS } from './reference/pickups.js';
 import { PRESSURE, PUSH_SHIFT, SEP_SHIFT } from './reference/steer.js';
 import { SHOT_RADIUS } from './reference/projectiles.js';
 import { PASSES } from './reference/swarm-reference.js';
@@ -51,7 +53,7 @@ export class Swarm {
     const buf = (/** @type {string} */ label, /** @type {number} */ words, /** @type {number} */ usage) =>
       device.createBuffer({ label: `swarm.${label}`, size: Math.max(16, words * 4), usage });
     this.buffers = {
-      L: buf('layout', 64, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST),
+      L: buf('layout', LAYOUT_FIELDS.length, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST),
       TP: device.createBuffer({ label: 'swarm.params', size: PARAMS_STRIDE * layout.caps.ticksInFlight, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
       U: buf('U', w.U, RW),
       P: buf('P', w.P, RW),
@@ -109,13 +111,25 @@ export class Swarm {
     const pre = new WgslPreprocessor(load);
     const header =
       SwarmLayout.wgslStruct() +
-      SwarmLayout.wgslConstants({ SEP_SHIFT, PUSH_SHIFT, PRESSURE, SHOT_RADIUS, PROXY_PUSHES: ProxyFlag.PUSHES, PLAYER_TEAM: Team.PLAYER });
+      SwarmLayout.wgslConstants({
+        SEP_SHIFT,
+        PUSH_SHIFT,
+        PRESSURE,
+        SHOT_RADIUS,
+        PICKUP_RADIUS,
+        MAGNET_SPEED,
+        CARRY_OFFSET,
+        PROXY_PUSHES: ProxyFlag.PUSHES,
+        PROXY_COLLECTOR: ProxyFlag.COLLECTOR,
+        PLAYER_TEAM: Team.PLAYER,
+      });
     const code = async (/** @type {string} */ name) => header + (await pre.process(`${KERNELS}${name}.wgsl`));
     const WG = this.wg;
     /** @type {[string, string, string, Record<string, number>][]} [pipeline name, kernel, entry point, constants] */
     const list = [
       ['clear', 'clear', 'main', { WG }],
       ['shotSpawn', 'shot-spawn', 'main', { WG }],
+      ['pickupSpawn', 'pickup-spawn', 'main', { WG }],
       ['unitSpawn', 'unit-spawn', 'main', { WG }],
       ['binCount', 'bin-count', 'main', { WG }],
       ['binScatter', 'bin-scatter', 'main', { WG }],
@@ -125,9 +139,10 @@ export class Swarm {
       ['resolve', 'resolve', 'main', { WG }],
       ['contact', 'contact', 'main', { WG }],
       ['targeting', 'targeting', 'main', { WG }],
+      ['pickups', 'pickups', 'main', { WG }],
       ['finalize', 'finalize', 'main', {}],
     ];
-    for (const mode of [0, 1, 2]) {
+    for (const mode of [0, 1, 2, 3, 4]) {
       for (const entry of ['blocks', 'sums', 'apply']) list.push([`scan${mode}.${entry}`, 'scan', entry, { WG, MODE: mode }]);
     }
     const sources = new Map();
@@ -250,8 +265,11 @@ export class Swarm {
       freeScan: () => {
         scan(0, L.unitCap);
         scan(1, L.shotCap);
+        scan(3, L.pickCap);
+        scan(4, L.unitCap);
       },
       shotSpawn: () => run('shotSpawn', groups(p.prevFires)),
+      pickupSpawn: () => run('pickupSpawn', groups(L.unitCap)), // drops are known on the GPU only
       unitSpawn: () => run('unitSpawn', groups(p.requests)),
       binCount: () => run('binCount', groups(L.unitCap)),
       binScan: () => scan(2, L.cells),
@@ -262,6 +280,7 @@ export class Swarm {
       resolve: () => run('resolve', groups(L.unitCap)),
       contact: () => run('contact', p.proxies),
       targeting: () => run('targeting', p.fires),
+      pickups: () => run('pickups', groups(L.pickCap)),
       finalize: () => run('finalize', 1),
     };
     for (let i = 0; i < count; i++) steps[PASSES[i]]();

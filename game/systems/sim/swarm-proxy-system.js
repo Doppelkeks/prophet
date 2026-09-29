@@ -2,9 +2,12 @@
 import { System } from '../../../engine/ecs/system.js';
 import { Health, Pilot, Transform } from '../../components/index.js';
 import { ProxyFlag, Team } from '../../../engine/swarm/swarm-contract.js';
-import { PATCH_RADIUS } from '../../data/arena.js';
+import { PATCH_MAGNET, PATCH_RADIUS } from '../../data/arena.js';
 
-/** Uploads PATCH as the swarm's proxy 0: the swarm chases it, is pushed off it, and damages it on contact. */
+/**
+ * Uploads PATCH as the swarm's proxy 0: the swarm chases it, is pushed off it, and damages it on contact;
+ * scrap gems inside its magnet radius fly to it.
+ */
 export class SwarmProxySystem extends System {
   static key = 'swarm-proxy';
   static stage = /** @type {const} */ ('PostSim');
@@ -21,7 +24,16 @@ export class SwarmProxySystem extends System {
     const y = c.col(Transform.y);
     const hp = c.col(Health.hp);
     for (let r = 0; r < c.count; r++) {
-      swarm.proxy({ entity: c.entity(r), x: i32[x + r], y: i32[y + r], radius: PATCH_RADIUS, team: Team.PLAYER, flags: ProxyFlag.TARGETABLE | ProxyFlag.PUSHES, hp: i32[hp + r] });
+      swarm.proxy({
+        entity: c.entity(r),
+        x: i32[x + r],
+        y: i32[y + r],
+        radius: PATCH_RADIUS,
+        team: Team.PLAYER,
+        flags: ProxyFlag.TARGETABLE | ProxyFlag.PUSHES | ProxyFlag.COLLECTOR,
+        hp: i32[hp + r],
+        aux: PATCH_MAGNET,
+      });
     }
   }
 }

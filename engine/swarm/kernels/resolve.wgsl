@@ -1,5 +1,5 @@
-// Pass 11: applies and clears each unit's accumulators; deaths bump the kill counters.
-// Twin: engine/swarm/reference/resolve.js.
+// Pass 11: applies and clears each unit's accumulators; deaths bump the kill counters and may drop scrap
+// (rand(DROP, tick, slot) against the type's chance). Twin: engine/swarm/reference/resolve.js.
 #define O_ATOMIC
 #include "swarm-common.wgsl"
 
@@ -28,4 +28,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (ty < L.typeCap) { atomicAdd(&O[L.oKillsType + ty], 1); }
   let source = u32(credit) & 0xffffu;
   if (credit > 0 && source < L.sourceCap) { atomicAdd(&O[L.oKillsSource + source], 1); }
+  if (ty >= L.typeCap) { return; }
+  let drop = bitcast<u32>(typeWord(info, TY_DROP));
+  let value = drop >> 17u;
+  if (value > 0u && rng_chance(rng_u32(L.keyDrop, TP.tick, i), drop & 0x1ffffu)) {
+    A[L.aDrop + i] = i32(value);
+    atomicAdd(&O[OH_SCRAP_DROPPED], i32(value));
+  }
 }

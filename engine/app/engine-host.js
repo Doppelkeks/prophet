@@ -42,6 +42,7 @@ import { SimBoot } from './sim-boot.js';
  * @property {'gpu' | 'cpu' | null} [swarm] swarm backend (default gpu; cpu = the JS reference, small pools)
  * @property {number | null} [units] unit-pool override
  * @property {number | null} [shots] shot-pool override
+ * @property {number | null} [pickups] pickup-pool override
  */
 
 /** Clear color when the game has no renderer: night-900. */
@@ -249,6 +250,7 @@ export class EngineHost {
     const caps = {};
     if (msg.units) caps.units = msg.units;
     if (msg.shots) caps.shots = msg.shots;
+    if (msg.pickups) caps.pickups = msg.pickups;
     const device = this.gpu.device;
     const boot = await SimBoot.create({
       game: this.game,
