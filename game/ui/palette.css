@@ -1,0 +1,28 @@
+/* game/ui/palette.css: the only place palette hex values are written (docs/game/03-art-audio.md#palette). */
+:root {
+  /* Environment */
+  --c-night-900: #070B16;  --c-night-800: #0B1224;  --c-night-700: #13203B;
+  --c-steel-700: #22385A;  --c-steel-500: #3E5F85;
+  --c-concrete-600: #4A4E57;  --c-concrete-400: #8A8F99;
+  --c-rust-900: #3B1A0E;  --c-rust-700: #7A3416;
+  /* Player family */
+  --c-sodium-500: #FF7A1A;  --c-amber-400: #FFB23F;  --c-ember-600: #E8431C;
+  /* Halcyon family */
+  --c-cyan-400: #19E6FF;  --c-blue-500: #2F6BFF;  --c-holo-100: #CFF6FF;
+  /* Reserved */
+  --c-magenta-500: #FF2E88;  --c-bone-100: #F2E6D8;
+
+  /* UI aliases */
+  --ui-panel: color-mix(in srgb, var(--c-night-900) 85%, transparent);   /* combat HUD */
+  --ui-panel-menu: color-mix(in srgb, var(--c-night-800) 96%, transparent);
+  --ui-line: color-mix(in srgb, var(--c-amber-400) 55%, transparent);
+  --ui-text: var(--c-bone-100);      --ui-text-dim: var(--c-concrete-400);
+  --ui-player: var(--c-sodium-500);  --ui-accent: var(--c-amber-400);
+  --ui-corp: var(--c-cyan-400);      --ui-danger: var(--c-ember-600);
+  --ui-anomalous: var(--c-magenta-500);
+  --rarity-scrap: var(--c-concrete-400);   --rarity-salvaged: var(--c-amber-400);
+  --rarity-military: var(--c-ember-600);   --rarity-halcyon: var(--c-cyan-400);
+  --rarity-anomalous: var(--c-magenta-500);
+}
+/* Colourblind aid, protan/deutan: the player primary moves to Amber, away from Ember. */
+:root[data-cvd="protan"], :root[data-cvd="deutan"] { --ui-player: var(--c-amber-400); }

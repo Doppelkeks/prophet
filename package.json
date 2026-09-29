@@ -1,0 +1,31 @@
+{
+  "name": "prophet",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Prophet engine (pure JS + WebGPU) and its first game, SCRAPWAKE",
+  "type": "module",
+  "main": "platforms/electron/main.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node tools/dev-server.js",
+    "build": "node tools/build.js",
+    "check": "npm run typecheck && npm run lint:sim && npm test",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint:sim": "node tools/lint-sim.js",
+    "test": "node --import ./tests/setup.js --test \"tests/unit/**/*.test.js\"",
+    "test:browser": "playwright test -c tests/browser",
+    "test:electron": "playwright test -c tests/electron",
+    "electron:dev": "electron . --px-root=.",
+    "electron": "npm run build && electron ."
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@webgpu/types": "0.1.74",
+    "electron": "44.4.5",
+    "esbuild": "0.28.2",
+    "typescript": "6.0.3"
+  }
+}

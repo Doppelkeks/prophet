@@ -1,0 +1,79 @@
+@import url('./palette.css');
+
+@layer reset, tokens, base, layout, components, screens, utilities, dev;
+
+@layer reset {
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+}
+
+@layer tokens {
+  :root {
+    --space: 8px;
+    --chamfer: 10px;
+    --font-ui: 'Space Grotesk', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    color-scheme: dark;
+  }
+}
+
+@layer base {
+  body {
+    background: var(--c-night-900);
+    color: var(--ui-text);
+    font-family: var(--font-ui);
+    overflow: hidden;
+  }
+  #px-canvas {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    display: block;
+  }
+  px-app {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    display: block;
+  }
+}
+
+@layer components {
+  .panel {
+    background: var(--ui-panel);
+    color: var(--ui-text);
+    padding: calc(var(--space) * 1.5) calc(var(--space) * 2);
+    clip-path: polygon(var(--chamfer) 0, 100% 0, 100% calc(100% - var(--chamfer)),
+                       calc(100% - var(--chamfer)) 100%, 0 100%, 0 var(--chamfer));
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .panel .title {
+    color: var(--ui-player);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+  }
+  .panel .dim { color: var(--ui-text-dim); }
+  .panel .ok { color: var(--ui-accent); }
+  .panel .bad { color: var(--ui-danger); }
+}
+
+@layer screens {
+  .boot {
+    position: absolute;
+    inset-block-start: calc(var(--space) * 2);
+    inset-inline-start: calc(var(--space) * 2);
+    max-inline-size: 460px;
+    white-space: pre-wrap;
+  }
+  .unsupported {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    pointer-events: auto;
+  }
+}
