@@ -3,8 +3,9 @@
 import '../../engine/core/dev-global.js';
 import { MainHost } from '../../engine/app/main-host.js';
 import { WorkerUrls } from '../../engine/platform/worker-urls.js';
+import { UiCommand } from '../data/ui-commands.js';
 import { HUD } from '../state/hud-state.js';
-import { updateHud } from '../state/hud-signals.js';
+import { hud, updateHud } from '../state/hud-signals.js';
 import '../ui/px-hud.js';
 
 const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('px-canvas'));
@@ -17,5 +18,24 @@ const host = new MainHost({
   engineWorkerUrl: WorkerUrls.resolve('engine', new URL('./engine-worker.js', import.meta.url)),
   hud: HUD,
   onHud: updateHud,
+  onReady: (e) => {
+    const sw = e.swarm ? `swarm ${e.swarm.backend} ${e.swarm.units}/${e.swarm.shots}` : 'no swarm';
+    const r = e.render ? `k${e.render.k}` : '';
+    hud.engine.value = `${host.threading} · ${e.perfTier} · ${e.driver} · ${sw} · ${r}`;
+  },
 });
 host.start();
+
+/** Tech-demo stress keys: UI commands, so replays carry them (docs/engine/07-ui.md#state-bridge). */
+/** @type {Record<string, number>} */
+const STRESS_KEYS = {
+  Equal: UiCommand.STRESS_UP,
+  NumpadAdd: UiCommand.STRESS_UP,
+  Minus: UiCommand.STRESS_DOWN,
+  NumpadSubtract: UiCommand.STRESS_DOWN,
+  BracketRight: UiCommand.BURST,
+};
+window.addEventListener('keydown', (e) => {
+  const code = STRESS_KEYS[e.code];
+  if (code && !e.repeat) host.command(code, 0, 0);
+});

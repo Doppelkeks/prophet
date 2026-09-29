@@ -105,7 +105,18 @@ npm run dev             # http://localhost:4173 (COOP/COEP headers, live reload)
 npm run check           # typecheck + sim lint + unit tests
 npm run test:browser    # Playwright + headless Chromium with WebGPU
 npm run electron:dev    # the desktop shell, serving the repo
+npm run replay -- f.json  # replay an exported run in Node on the JS reference swarm
 ```
+
+**The tech demo** (`npm run dev`, then open the page):
+- Move PATCH with WASD, the arrow keys or a gamepad's d-pad and left stick. PATCH fires on its own.
+- Swarm rings spawn around PATCH and chase it.
+- `=` and `-` raise and lower the director's stress; `]` spawns a burst ring.
+- URL options:
+  - `?units=&shots=` override the swarm pools.
+  - `?swarm=cpu` runs the JS reference swarm.
+  - `?threading=`, `?driver=`, `?perf=` force a tier.
+- `window.__px.exportReplay()` returns the run so far; `npm run replay` checks that it replays identically.
 
 Working rules for contributors (and coding agents) are in [CLAUDE.md](CLAUDE.md).
 
@@ -115,7 +126,7 @@ Working rules for contributors (and coding agents) are in [CLAUDE.md](CLAUDE.md)
 engine/     Prophet: pure JS, zero runtime dependencies
 game/       SCRAPWAKE: entry points, components, systems, shaders, UI, data
 platforms/  electron/
-tools/      dev server, sim lint, generators (build and asset cooker to come)
+tools/      dev server, sim lint, replay, generators (build and asset cooker to come)
 tests/      unit (node:test) · browser (Playwright + WebGPU) · electron
 docs/       the concept and the specs
 ```

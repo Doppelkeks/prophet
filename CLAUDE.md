@@ -20,6 +20,7 @@ Keep code and docs in sync.
 | `npm run test:electron` | Electron smoke; on Linux without a display, prefix `xvfb-run -a` |
 | `npm run build` | Production bundle in `dist/web` |
 | `npm run electron:dev` | Electron serving the repo root |
+| `npm run replay -- f.json` | Replay an exported run (`__px.exportReplay()`) in Node on the JS reference swarm |
 
 ## Rules
 

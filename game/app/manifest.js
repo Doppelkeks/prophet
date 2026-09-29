@@ -9,10 +9,11 @@ import { MovementSystem } from '../systems/sim/movement-system.js';
 import { PilotInputSystem } from '../systems/sim/pilot-input-system.js';
 import { SwarmFeedbackSystem } from '../systems/sim/swarm-feedback-system.js';
 import { SwarmProxySystem } from '../systems/sim/swarm-proxy-system.js';
+import { UiCommandSystem } from '../systems/sim/ui-command-system.js';
 
 /** @type {import('../../engine/ecs/registry.js').ManifestSpec} */
 export const GAME_MANIFEST = {
   components: [Transform, Motion, Pilot, Health, Gun, RunStats, Director],
-  systems: [SwarmFeedbackSystem, PilotInputSystem, DirectorSystem, AutoFireSystem, MovementSystem, SwarmProxySystem],
+  systems: [SwarmFeedbackSystem, PilotInputSystem, UiCommandSystem, DirectorSystem, AutoFireSystem, MovementSystem, SwarmProxySystem],
   kernels: [],
 };

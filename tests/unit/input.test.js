@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ActionMap } from '../../engine/input/action-map.js';
-import { CommandLog } from '../../engine/input/command-log.js';
+import { CommandLog, UI_MAX, UI_WORDS } from '../../engine/input/command-log.js';
 import { InputCodes } from '../../engine/input/input-codes.js';
 import { Buttons, InputFlags, InputRecord } from '../../engine/input/input-record.js';
 import { InputKind } from '../../engine/input/input-ring.js';
@@ -62,5 +62,34 @@ test('the command log records ticks in order and round-trips through JSON', () =
   const copy = CommandLog.fromJSON(JSON.parse(JSON.stringify(log)));
   assert.equal(copy.length, 10000);
   assert.equal(copy.hash(), log.hash());
-  assert.equal(copy.w1(9999), ~9999 >>> 0);
+  assert.equal(copy.w1(9999), (~9999 >>> 0) & 0xffffff, 'the UI command count byte belongs to the log');
+});
+
+test('UI commands ride the input ring into InputState, and the command log keeps them per tick', () => {
+  const s = new InputState();
+  s.apply(InputKind.UI, 7, 1, 2);
+  s.apply(InputKind.UI, 8, 0xffffffff, 0);
+  assert.equal(s.uiCount, 2);
+  assert.deepEqual(Array.from(s.ui.subarray(0, 2 * UI_WORDS)), [7, 1, 2, 8, 0xffffffff, 0]);
+  for (let i = 0; i < UI_MAX; i++) s.apply(InputKind.UI, 9, 0, 0);
+  assert.equal(s.uiCount, UI_MAX);
+  assert.equal(s.uiDropped, 2, 'beyond UI_MAX per tick, commands are dropped and counted');
+
+  const log = new CommandLog();
+  const ui = Uint32Array.of(1, 10, 11, 2, 20, 21, 3, 30, 31);
+  for (let t = 0; t < 5000; t++) {
+    const n = t % 4; // 0..3 commands on each tick
+    log.set(t, t, 0xff000000 | t, ui, n); // the count in w1 comes from the argument, not from w1
+  }
+  assert.equal(log.uiCount(3), 3);
+  assert.equal(log.w1(3) >>> 24, 3);
+  assert.equal(log.w1(4) & 0xffffff, 4);
+  assert.deepEqual(Array.from(log.uiWords.subarray(log.uiAt(2), log.uiAt(2) + 2 * UI_WORDS)), [1, 10, 11, 2, 20, 21]);
+  const copy = CommandLog.fromJSON(JSON.parse(JSON.stringify(log)));
+  assert.equal(copy.hash(), log.hash());
+  assert.equal(copy.uiAt(4999), log.uiAt(4999));
+  assert.throws(() => log.set(5000, 0, 0, ui, 256), /at most 255/);
+  const other = new CommandLog();
+  for (let t = 0; t < 5000; t++) other.set(t, t, t, ui, t === 4000 ? 2 : t % 4);
+  assert.notEqual(other.hash(), log.hash(), 'UI commands are part of the log hash');
 });

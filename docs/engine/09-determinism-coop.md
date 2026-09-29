@@ -250,6 +250,12 @@ The sim consumes only **commands**, each stamped with the tick it applies to. Ev
 | 6 | Flags | `u8` | Aim override active, input device class |
 | 7 | UI commands | `u8` | Number of UI command records attached to this tick |
 
+**UI command records** live beside the input records in the log (`engine/input/command-log.js`), in tick order:
+- Each record is three `u32` words: a game-defined code and two arguments.
+- A tick carries at most 255 of them. The count byte of word 1 belongs to the log, so it always matches the stored records.
+- The log hash covers both streams.
+- In the tech demo, the stress keys are UI commands (`game/data/ui-commands.js`), applied by `UiCommandSystem` in the Input stage.
+
 **Quantization happens before stamping.** The engine maps raw input through the action maps ([07: input](07-ui.md#input)), projects the cursor into the world with render math (floats), and quantizes the result to `i8` and `u16`. The log stores only the quantized values, so float math never reaches the sim.
 
 **UI and engine commands:**
@@ -304,6 +310,12 @@ Collision data is not asynchronous. The engine worker is the voxel authority and
 | Hash stream | State hashes at a fixed tick interval, for verification |
 
 - Size, e.g.: 8 bytes × 60 ticks × 1,200 s ≈ 0.55 MB raw per player for a 20-minute Cycle, and far less after run-length encoding.
+- **Today's format** (`engine/app/replay.js`, version 1) is JSON, without run-length encoding. It holds:
+  - `build`: for now, the manifest hash.
+  - `heapProfile`, the swarm `seed`, *K*, and the swarm's full caps (the sim profile).
+  - `hashEvery`, `ticks`, the command log, and the hash stream as flat `[tick, hash]` pairs.
+
+  The engine worker hashes every 60 ticks and exports a document on request (`window.__px.exportReplay()`). `Replay.run` plays it back headless with the JS reference swarm and reports the first divergent tick. `npm run replay -- file.json` wraps it for the command line.
 - A replay plays only on its own build. When the sim changes on purpose, the CI corpus is re-recorded, and re-blessing the golden hashes is a reviewed change.
 
 **State hashes:**

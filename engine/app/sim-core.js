@@ -7,7 +7,8 @@ import { SwarmInbound, SwarmOutbound } from '../swarm/swarm-contract.js';
 
 /**
  * @typedef {object} SimResources engine-thread services systems may use (serial systems only)
- * @property {{ w0: number, w1: number }} input the input record of the running tick
+ * @property {{ w0: number, w1: number, ui: Uint32Array, uiAt: number, uiCount: number }} input the input
+ *   record of the running tick, and its UI commands: `uiCount` records of `UI_WORDS` from `ui[uiAt]`
  * @property {number} tick the running tick
  * @property {SwarmInbound | null} swarm this tick's inbound swarm block (spawns, fire commands, proxies)
  * @property {SwarmOutbound | null} swarmOut the swarm's report of tick − K, applied this tick
@@ -45,19 +46,24 @@ export class SimCore {
     this.stalls = 0;
     this.swarm = o.swarm ?? null;
     this.prevFires = 0;
-    this.resources.input = { w0: 0, w1: 0 };
+    this.resources.input = { w0: 0, w1: 0, ui: this.log.uiWords, uiAt: 0, uiCount: 0 };
     this.resources.tick = 0;
     this.resources.swarm = this.swarm ? new SwarmInbound(this.swarm.backend.layout) : null;
     this.resources.swarmOut = null;
   }
 
   /**
-   * Stamps the input record of the next tick (live play). A replay preloads the log instead, and
-   * stamping a tick that already has a record changes nothing.
+   * Stamps the input record of the next tick, with the UI commands that arrived since the last stamp
+   * (live play). A replay preloads the log instead, and stamping a tick that already has a record
+   * changes nothing.
    * @param {number} w0 @param {number} w1
+   * @param {Uint32Array | null} [ui] UI command records (`UI_WORDS` each) @param {number} [uiCount]
+   * @returns {boolean} whether the record (and so the UI commands) went into the log
    */
-  stamp(w0, w1) {
-    if (!this.log.has(this.tick)) this.log.set(this.tick, w0, w1);
+  stamp(w0, w1, ui = null, uiCount = 0) {
+    if (this.log.has(this.tick)) return false;
+    this.log.set(this.tick, w0, w1, ui, uiCount);
+    return true;
   }
 
   /** Whether the next tick has its input (a replay ends when it doesn't). */
@@ -93,6 +99,9 @@ export class SimCore {
     const input = res.input;
     input.w0 = this.log.w0(t);
     input.w1 = this.log.w1(t);
+    input.ui = this.log.uiWords; // the log may have grown
+    input.uiAt = this.log.uiAt(t);
+    input.uiCount = this.log.uiCount(t);
     res.tick = t;
     await this.scheduler.tick();
     if (swarm) {

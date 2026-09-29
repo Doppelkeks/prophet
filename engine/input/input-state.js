@@ -1,6 +1,7 @@
 // @ts-check
 // Engine-side view of the raw input: key bitset, pointer, wheel and gamepad state, rebuilt from the
 // input-ring records every frame.
+import { UI_MAX, UI_WORDS } from './command-log.js';
 import { InputKind } from './input-ring.js';
 
 export class InputState {
@@ -18,6 +19,11 @@ export class InputState {
     this.padButtons = 0;
     /** Last device used: 0 keyboard and mouse, 1 gamepad. */
     this.device = 0;
+    /** UI commands waiting for the next stamped tick: `UI_WORDS` each (code, a, b). */
+    this.ui = new Uint32Array(UI_MAX * UI_WORDS);
+    this.uiCount = 0;
+    /** UI commands lost because more than UI_MAX arrived before a tick was stamped. */
+    this.uiDropped = 0;
   }
 
   /** Applies one ring record. @param {number} kind @param {number} a @param {number} b @param {number} c */
@@ -51,6 +57,17 @@ export class InputState {
         this.padRY = b >> 16;
         if (c !== this.padButtons || a !== 0 || b !== 0) this.device = 1;
         this.padButtons = c;
+        break;
+      case InputKind.UI:
+        if (this.uiCount < UI_MAX) {
+          const o = this.uiCount * UI_WORDS;
+          this.ui[o] = a;
+          this.ui[o + 1] = b;
+          this.ui[o + 2] = c;
+          this.uiCount++;
+        } else {
+          this.uiDropped++;
+        }
         break;
       case InputKind.BLUR:
         this.keys.fill(0);

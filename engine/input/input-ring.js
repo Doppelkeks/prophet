@@ -16,6 +16,7 @@ export const InputKind = Object.freeze({
   WHEEL: 4, // a = delta y (device pixels, rounded)
   GAMEPAD: 5, // a = left stick (x i16 | y i16 << 16), b = right stick, c = buttons bitmask
   BLUR: 6, // focus lost: release everything
+  UI: 7, // a UI command for the next tick: a = code, b and c = arguments (the game defines them)
 });
 
 const HEAD = 0;

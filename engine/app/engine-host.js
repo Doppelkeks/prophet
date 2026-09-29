@@ -17,6 +17,7 @@ import { Renderer } from '../render/renderer.js';
 import { SwarmReference } from '../swarm/reference/swarm-reference.js';
 import { Swarm } from '../swarm/swarm.js';
 import { StateBlockWriter } from '../ui/state-block.js';
+import { Replay } from './replay.js';
 import { SimBoot } from './sim-boot.js';
 
 /**
@@ -51,6 +52,8 @@ const HUD_EVERY = 2; // frames: the HUD refreshes at 30 Hz at 60 fps
 /** Frames of GPU work that may be queued at once (docs/BUDGETS.md#simulation-constants). A frame that finds
  * more waits: the CPU never runs ahead of the GPU, which bounds memory, swapchain textures and readback latency. */
 const MAX_FRAMES_IN_FLIGHT = 2;
+/** State-hash interval of debug builds, in ticks (docs/BUDGETS.md#simulation-constants). */
+const HASH_EVERY = 60;
 
 export class EngineHost {
   /**
@@ -80,6 +83,8 @@ export class EngineHost {
     /** @type {Renderer | null} */
     this.renderer = null;
     this.camera = new ObliqueCamera();
+    /** @type {import('./replay.js').ReplayHeader | null} what a replay of this run needs besides the log */
+    this.replay = null;
     this.shared = false;
     this.input = new InputState();
     this.actions = new ActionMap();
@@ -115,6 +120,9 @@ export class EngineHost {
       case 'capture':
         this.capture(msg.id);
         break;
+      case 'export':
+        this.exportReplay(msg.id);
+        break;
     }
   }
 
@@ -133,13 +141,23 @@ export class EngineHost {
   capture(id) {
     const r = this.renderer;
     if (!r) {
-      this.scope.postMessage({ type: 'capture', id, error: 'no renderer' });
+      this.scope.postMessage({ type: 'reply', id, error: 'no renderer' });
       return;
     }
     r.capture().then(
-      (img) => this.scope.postMessage({ type: 'capture', id, tick: this.sim?.tick ?? 0, ...img }, { transfer: [img.data.buffer] }),
-      (err) => this.scope.postMessage({ type: 'capture', id, error: String(err) }),
+      (img) => this.scope.postMessage({ type: 'reply', id, value: { tick: this.sim?.tick ?? 0, ...img } }, { transfer: [img.data.buffer] }),
+      (err) => this.scope.postMessage({ type: 'reply', id, error: String(err) }),
     );
+  }
+
+  /** Posts the run so far as a replay document (docs/engine/09-determinism-coop.md#replays-and-hashes). @param {number} id */
+  exportReplay(id) {
+    const sim = this.sim;
+    if (!sim || !this.replay) {
+      this.scope.postMessage({ type: 'reply', id, error: 'no simulation' });
+      return;
+    }
+    this.scope.postMessage({ type: 'reply', id, value: Replay.document(sim, this.replay) });
   }
 
   /** @param {InitMessage} msg */
@@ -175,8 +193,17 @@ export class EngineHost {
         : (layout, tables, seed) => new SwarmReference(layout, tables, { seed }),
       swarmProfile: gpuSwarm ? perf : 'test',
       swarmCaps: caps,
+      hashEvery: HASH_EVERY,
     });
     this.sim = boot.sim;
+    this.replay = {
+      build: boot.manifest.hash,
+      heapProfile: perf,
+      seed: this.game.swarm?.seed ?? 0,
+      K: boot.swarm?.K ?? 0,
+      swarmCaps: boot.swarm ? { ...boot.swarm.backend.layout.caps } : null,
+      hashEvery: HASH_EVERY,
+    };
     if (boot.swarm && !gpuSwarm) this.reference = /** @type {SwarmReference} */ (boot.swarm.backend);
     if (this.game.render) {
       const r = await Renderer.create(device, this.gpu.format, this.game.render.style);
@@ -246,7 +273,7 @@ export class EngineHost {
       try {
         while (this.acc >= TICK_MS && ticks < cap) {
           const [w0, w1] = this.actions.sample(this.input);
-          sim.stamp(w0, w1);
+          if (sim.stamp(w0, w1, this.input.ui, this.input.uiCount)) this.input.uiCount = 0;
           if (!(await sim.step())) break; // stalled on a late swarm block: retry next frame
           this.acc -= TICK_MS;
           ticks++;

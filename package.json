@@ -18,6 +18,7 @@
     "test": "node --import ./tests/setup.js --test \"tests/unit/**/*.test.js\"",
     "test:browser": "playwright test -c tests/browser",
     "test:electron": "playwright test -c tests/electron",
+    "replay": "node tools/replay.js",
     "electron:dev": "electron . --px-root=.",
     "electron": "npm run build && electron ."
   },

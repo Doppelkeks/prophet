@@ -38,13 +38,16 @@ export class PxHud extends UiElement {
       <span class="dim">x</span><output id="x"></output><span class="dim">y</span><output id="y"></output></div>
     <div class="row"><span class="enemy">SWARM</span><output id="alive"></output><span class="dim">alive</span>
       <output id="kills"></output><span class="dim">kills</span><span class="dim">wave</span><output id="waves"></output>
-      <span class="dim">downs</span><output id="downs"></output></div>
+      <span class="dim">downs</span><output id="downs"></output>
+      <span class="dim">stress</span><output id="stress"></output><span class="dim">shots</span><output id="shots"></output>
+      <span class="dim">rejected</span><output id="rejected"></output></div>
     <div class="row dim"><span>tick</span><output id="tick"></output><output id="fps"></output><span>fps</span>
       <span>sim</span><output id="sim"></output><span>ms</span><span>stalls</span><output id="stalls"></output>
-      <span>rb95</span><output id="rb"></output></div>`;
+      <span>rb95</span><output id="rb"></output></div>
+    <div class="row dim"><output id="engine"></output><span>[=] [−] stress · []] burst</span></div>`;
 
   connected() {
-    /** @param {string} id @param {{ value: number }} source @param {(v: number) => string} fmt */
+    /** @template T @param {string} id @param {{ value: T }} source @param {(v: T) => string} fmt */
     const text = (id, source, fmt) => {
       const el = this.$(`#${id}`);
       this.bind(source, (v) => {
@@ -67,6 +70,10 @@ export class PxHud extends UiElement {
     text('sim', hud.simMs, (v) => v.toFixed(2));
     text('stalls', hud.stalls, String);
     text('rb', hud.readbackP95, (v) => v.toFixed(1));
+    text('stress', hud.stress, String);
+    text('shots', hud.shots, String);
+    text('rejected', hud.rejected, String);
+    text('engine', hud.engine, String);
   }
 }
 UiElement.define(PxHud);

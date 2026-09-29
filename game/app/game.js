@@ -56,7 +56,9 @@ export const SCRAPWAKE = {
     world.add(patch, Health, [Units.q8(100), Units.q8(100)]);
     world.add(patch, Gun, [0, Units.ticks(0.1), Units.q10(14), Units.q8(1.5), Units.q10PerTick(30), Units.ticks(0.7), 1, 0]);
     const run = world.spawn(ARCHETYPES.run);
-    world.add(run, Director, [Units.ticks(1), Units.ticks(1.5), 24, 6, 20000, Units.q10(18), Units.q10(24), 0]);
+    // The director never asks for more units than the pool holds (the replay header records the pool).
+    const pool = sim.swarm ? sim.swarm.backend.layout.caps.units : 20000;
+    world.add(run, Director, [Units.ticks(1), Units.ticks(1.5), 24, 6, Math.min(20000, pool), Units.q10(18), Units.q10(24), 0]);
     sim.resources.patch = patch;
     sim.resources.run = run;
   },

@@ -1,7 +1,7 @@
 // @ts-check
 import { Heap } from '../core/heap.js';
 import { InputCapture } from '../input/input-capture.js';
-import { InputRing } from '../input/input-ring.js';
+import { InputKind, InputRing } from '../input/input-ring.js';
 import { Probes } from '../platform/probes.js';
 import { Tiers } from '../platform/tiers.js';
 import { CanvasMeter } from '../render/canvas-meter.js';
@@ -22,6 +22,8 @@ import { DevReload } from './dev-reload.js';
  * @property {{ dropped: number, retries: number }} bridge input records dropped, state-block read retries
  * @property {string | null} error
  * @property {() => Promise<Capture>} capture the internal image of the engine's last frame
+ * @property {(code: number, a?: number, b?: number) => boolean} command sends a UI command (MainHost.command)
+ * @property {() => Promise<Record<string, any>>} exportReplay the run so far as a replay document
  */
 
 /**
@@ -41,6 +43,7 @@ import { DevReload } from './dev-reload.js';
  * @property {URL} engineWorkerUrl
  * @property {import('../ui/state-block.js').StateSchema} hud layout of the UI state block
  * @property {(reader: StateBlockReader) => void} [onHud] called after each successful state-block read
+ * @property {(engine: Record<string, any>) => void} [onReady] called once the engine runs, with its info
  */
 
 /** Frames between state-block reads on the main thread: 30 Hz at 60 fps (docs/BUDGETS.md#ui-constants). */
@@ -71,11 +74,13 @@ export class MainHost {
       hud: null,
       bridge: { dropped: 0, retries: 0 },
       error: null,
-      capture: () => this.requestCapture(),
+      capture: () => this.request('capture'),
+      command: (code, a = 0, b = 0) => this.command(code, a, b),
+      exportReplay: () => this.request('export'),
     };
-    /** @type {Map<number, { resolve: (c: Capture) => void, reject: (e: Error) => void }>} */
-    this.captures = new Map();
-    this.captureId = 0;
+    /** Requests waiting for the engine's answer, by id. @type {Map<number, { resolve: (v: any) => void, reject: (e: Error) => void }>} */
+    this.requests = new Map();
+    this.requestId = 0;
     /** @type {ResizeObserver | null} */
     this.resizer = null;
     /** @type {Worker | null} */
@@ -144,14 +149,15 @@ export class MainHost {
         this.debug.engine = msg.engine;
         this.debug.status = 'ok';
         this.connect(msg.engine.driver, msg.bridge);
+        this.options.onReady?.(msg.engine);
         break;
       case 'state':
         this.reader?.receive(msg.words);
         return;
-      case 'capture': {
-        const p = this.captures.get(msg.id);
-        this.captures.delete(msg.id);
-        if (p) msg.error ? p.reject(new Error(msg.error)) : p.resolve(msg);
+      case 'reply': {
+        const p = this.requests.get(msg.id);
+        this.requests.delete(msg.id);
+        if (p) msg.error ? p.reject(new Error(msg.error)) : p.resolve(msg.value);
         return;
       }
       case 'stats':
@@ -220,15 +226,31 @@ export class MainHost {
     Signals.flush();
   }
 
-  /** @returns {Promise<Capture>} */
-  requestCapture() {
+  /**
+   * Asks the engine for something and waits for its reply: `capture` (the internal image) or `export`
+   * (the replay document).
+   * @param {'capture' | 'export'} type
+   * @returns {Promise<any>}
+   */
+  request(type) {
     const worker = this.worker;
     if (!worker || this.debug.status !== 'ok') return Promise.reject(new Error('engine not running'));
-    const id = ++this.captureId;
+    const id = ++this.requestId;
     return new Promise((resolve, reject) => {
-      this.captures.set(id, { resolve, reject });
-      worker.postMessage({ type: 'capture', id });
+      this.requests.set(id, { resolve, reject });
+      worker.postMessage({ type, id });
     });
+  }
+
+  /**
+   * Sends a UI command (docs/engine/07-ui.md#state-bridge). It rides the input ring, in order with the
+   * raw input, and the engine stamps it into the next tick's record, so replays carry it.
+   * @param {number} code a game-defined command code @param {number} a @param {number} b
+   * @returns {boolean} false if the ring was full and the command was dropped
+   */
+  command(code, a, b) {
+    if (!this.ring) return false;
+    return this.ring.push(InputKind.UI, code, a, b);
   }
 
   /** @param {string} message */
