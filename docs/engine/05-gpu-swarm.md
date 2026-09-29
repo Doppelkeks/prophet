@@ -281,7 +281,16 @@ The first implementation (M2) runs a subset of the chain, with the same determin
 - **Projectiles.** Shots skip their last hit (the slot only, in v0). Kill credit is `(min(damage >> 8, 0x7FFE) + 1) << 16 | source`, so every hit credits a source. Fire request *k* takes free shot slot *k*, which leaves the slot of a command without a target unused for that tick.
 - **Contact.** Contact damage lands when `(tick + anim phase) mod attack interval = 0`. The phase is drawn from the RNG at spawn.
 - **Contract in v0.** Fire commands carry the shot's speed, lifetime and pierce directly; the pattern table comes later. The CPU systems that write swarm commands run serially on the engine worker, in system order, straight into the tick's inbound block; command-buffer segments for them come with parallel producers. The outbound block holds a header (tick, alive counts, rejections, kills, shots fired, contact hits), kills per type and per source, per-proxy damage, and one fire-result bit per command. Events and maps come later.
-- **Tests.** Scene tests, shuffle invariance and a golden hash run in `node --test`. SimCore replays with random readback delays and then stalls, and must give identical hashes.
+- **GPU backend.** The GPU backend is `engine/swarm/swarm.js`.
+  - The WGSL kernels live in `engine/swarm/kernels/`, one file per pass. They include `swarm-common.wgsl` for bindings and helpers. A kernel that needs atomics on `A` or `O` sets `#define A_ATOMIC` / `O_ATOMIC` first; another pass may declare the same buffer as plain `array<i32>`.
+  - The `Layout` struct and every shared constant are generated from `swarm-layout.js` and prepended to each kernel, so the JS and WGSL numbers can't drift apart.
+  - The workgroup size is an `override` constant (`WG`: 32, 64, 128 or 256).
+  - The free-slot and bin scans share one three-level scan kernel (blocks of 256, the block sums, apply), with a `MODE` override.
+  - Each frame encodes its ticks into one command encoder. Each tick gets its own inbound block in the `I` ring, its own parameter slot (a dynamic uniform offset), and a copy of `O` into the frame's readback slot.
+- **Tests.**
+  - `node --test` runs the scene tests, shuffle invariance and a golden hash. SimCore replays with random readback delays, which cause stalls, and must still give identical hashes.
+  - In `tests/browser/swarm.spec.js`, the GPU must equal the reference on **every tick**: at 2,000 units × 300 ticks for workgroup sizes 32, 64 and 128, and at 100,000 units × 5 ticks. Every outbound block must come back through the readback ring in order.
+  - On a mismatch, the test replays the tick pass by pass from the last matching state (`Swarm.runTick` with a pass count, `readState`/`writeState`, the reference's `afterPass` hook) and names the first divergent kernel.
 
 ## CPU-GPU contract
 

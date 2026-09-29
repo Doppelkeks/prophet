@@ -58,6 +58,7 @@ Rules and rationale are in [engine/09-determinism-coop.md](engine/09-determinism
 | Max sim ticks per rendered frame | 4 | Spiral-of-death guard: past this, the game slows down instead of catching up |
 | **K** (GPU→CPU event latency) | **4 ticks** | An event stamped with tick *T* is applied at tick *T+K*. If it arrives late, the sim stalls; events are never skipped. |
 | Readback ring depth | ≥ K + 1 slots | One slot being written plus up to K in flight ([03](engine/03-rendering.md#readback-ring)) |
+| Frames in flight | 2 | The engine never runs more than two frames of GPU work ahead. A frame that finds more waits: no ticks and no GPU work that frame ([01](engine/01-overview.md#frame-pipeline)) |
 | Async commit lag, flow fields (*L_field*) | 15 ticks (250 ms) | Solve results are committed at tick *R + L*, where *R* is the request tick ([09](engine/09-determinism-coop.md#async-results-at-fixed-ticks)) |
 | Async commit lag, collapse (*L_collapse*) | 6 ticks | Matches the collapse budget below |
 | Async commit lag, PCG (*L_pcg*) | Not used in v1 | Generation finishes before tick 0. Mid-run generation would need a lag defined here first. |
@@ -335,3 +336,4 @@ Rationale and the alternative candidate are in [engine/04-pixel-art-pipeline.md]
 | 2026-09-26 | M0 review: K raised to 4 (desktop) / 8 (mobile) ticks with a p99 readback rule; readback ring depth; sim profiles; async commit lags; Q16/Q12 formats; state-hash interval; co-op input delay; ECS chunk size; density-map cell; portal payload caps; quality gates |
 | 2026-09-29 | Mobile dropped ([ADR-024](DECISIONS.md#adr-024-desktop-and-web-only)): tiers are `high` and `std` only. Removed the `mobile` columns and phone reference devices, K = 8, the mobile collapse lag, the mobile district, grids and dense cap, the iOS app size, the mobile boot, readback, input-latency and post targets, the touch target and the mobile voice count. One district size for every tier; the half-rate swarm is an unused `std` reserve. |
 | 2026-09-29 | Swarm v0: separation pairwise cap (8 units per bin cell) |
+| 2026-09-29 | Frames in flight: 2 (the engine waits for the GPU instead of queueing unbounded work) |

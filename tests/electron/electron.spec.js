@@ -9,7 +9,8 @@ test('Electron shell: app:// origin, cross-origin isolated, WebGPU adapter, fram
   const app = await electron.launch({
     cwd: root,
     // --no-sandbox: CI containers run as root (tests only; the shipped app keeps the sandbox).
-    args: ['--no-sandbox', root, `--px-root=${pxRoot}`],
+    // Small swarm pools keep SwiftShader fast (tests/browser/swarm.spec.js covers large scales).
+    args: ['--no-sandbox', root, `--px-root=${pxRoot}`, '--px-query=units=4096&shots=1024'],
     env: { ...process.env, PX_GPU_SWITCHES: process.env.PX_GPU_SWITCHES ?? 'swiftshader' },
   });
   try {
@@ -44,6 +45,9 @@ test('Electron shell: app:// origin, cross-origin isolated, WebGPU adapter, fram
     await win.keyboard.down('KeyD');
     await win.waitForFunction(() => (window.__px?.hud?.patchX ?? 0) > 1024, null, { timeout: 10_000 });
     await win.keyboard.up('KeyD');
+    // The GPU swarm runs: waves spawn and PATCH's auto-fire kills units (targeting happens on the GPU).
+    await win.waitForFunction(() => (window.__px?.hud?.kills ?? 0) > 0, null, { timeout: 30_000 });
+    expect(await win.evaluate(() => window.__px?.status)).toBe('ok');
   } finally {
     await app.close();
   }

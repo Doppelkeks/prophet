@@ -142,6 +142,7 @@ Nothing in this ladder changes simulation results. Anything that would (caps, *K
 | Linux, Intel Gen12+ / NVIDIA (Wayland) | None, or the AMD set as a fallback | On by default from Chromium 144 / 147 |
 | Linux AMD, including **Steam Deck** and Steam Machine | `--enable-unsafe-webgpu --ozone-platform=x11 --use-angle=vulkan --enable-features=Vulkan,VulkanFromANGLE` | AMD is still behind a flag. Electron 38+ runs natively on Wayland, so x11 is forced. |
 | Steam Linux Runtime | `--no-sandbox --no-zygote --in-process-gpu --disable-dev-shm-usage` *(verify for our build)* | Runtime container constraints |
+| CI and containers without a GPU (`PX_GPU_SWITCHES=swiftshader`) | `--enable-unsafe-webgpu --enable-unsafe-swiftshader --use-angle=swiftshader --use-webgpu-adapter=swiftshader --use-vulkan=swiftshader --enable-features=Vulkan` | SwiftShader everywhere. Without the Vulkan compositor, configuring a WebGPU canvas loses the device at once ("A valid external Instance reference no longer exists"). |
 
 If `requestAdapter()` returns null on Linux, the launcher retries once with the alternative switch set. If that also fails, it shows a diagnostics screen.
 

@@ -13,6 +13,7 @@ import { InputState } from '../input/input-state.js';
 import { WorkerPorts } from '../jobs/worker-port.js';
 import { Tiers } from '../platform/tiers.js';
 import { SwarmReference } from '../swarm/reference/swarm-reference.js';
+import { Swarm } from '../swarm/swarm.js';
 import { StateBlockWriter } from '../ui/state-block.js';
 import { SimBoot } from './sim-boot.js';
 
@@ -35,6 +36,9 @@ import { SimBoot } from './sim-boot.js';
  * @property {string} driver 'raf' | 'ping' | 'atomics' | 'auto'
  * @property {string | null} [perf] performance-tier override
  * @property {number | null} [workers] job-worker count override
+ * @property {'gpu' | 'cpu' | null} [swarm] swarm backend (default gpu; cpu = the JS reference, small pools)
+ * @property {number | null} [units] unit-pool override
+ * @property {number | null} [shots] shot-pool override
  */
 
 /** Night-900 from the palette, as the clear color. */
@@ -42,6 +46,9 @@ const CLEAR = { r: 7 / 255, g: 11 / 255, b: 22 / 255, a: 1 };
 const TICK_MS = 1000 / TICK_HZ;
 const MAX_TICKS_PER_FRAME = 4; // docs/BUDGETS.md#simulation-constants
 const HUD_EVERY = 2; // frames: the HUD refreshes at 30 Hz at 60 fps
+/** Frames of GPU work that may be queued at once (docs/BUDGETS.md#simulation-constants). A frame that finds
+ * more waits: the CPU never runs ahead of the GPU, which bounds memory, swapchain textures and readback latency. */
+const MAX_FRAMES_IN_FLIGHT = 2;
 
 export class EngineHost {
   /**
@@ -62,6 +69,8 @@ export class EngineHost {
     this.ring = null;
     /** @type {StateBlockWriter | null} */
     this.hud = null;
+    /** @type {Swarm | null} the GPU swarm, when it is the backend */
+    this.swarm = null;
     this.shared = false;
     this.input = new InputState();
     this.actions = new ActionMap();
@@ -70,7 +79,9 @@ export class EngineHost {
     this.busy = false;
     this.last = -1;
     this.acc = 0;
-    this.stats = { fps: 0, frameMs: 0, simMs: 0, ticks: 0, skipped: 0 };
+    this.stats = { fps: 0, frameMs: 0, simMs: 0, ticks: 0, skipped: 0, readbackP95: 0, gpuWaits: 0 };
+    /** Frames submitted to the GPU and not finished yet. */
+    this.inFlight = 0;
     scope.onmessage = (e) => this.onMessage(e.data);
   }
 
@@ -97,6 +108,7 @@ export class EngineHost {
     msg.canvas.width = msg.width;
     msg.canvas.height = msg.height;
     this.gpu = await GpuDevice.create({ canvas: msg.canvas });
+    this.gpu.lost.then((info) => this.fail(new Error(`webgpu-device-lost (${info.reason}): ${info.message}`)));
     this.gpu.device.addEventListener('uncapturederror', (e) => {
       this.fail(new Error(`WebGPU validation: ${/** @type {GPUUncapturedErrorEvent} */ (e).error.message}`));
     });
@@ -106,15 +118,23 @@ export class EngineHost {
     const workers = msg.workers ?? Tiers.jobWorkers(threading, perf, cores);
     this.shared = threading === 'shared';
     const heap = Heap.create(perf, this.shared);
+    const gpuSwarm = msg.swarm !== 'cpu';
+    /** @type {Partial<import('../swarm/swarm-layout.js').SwarmCaps>} */
+    const caps = {};
+    if (msg.units) caps.units = msg.units;
+    if (msg.shots) caps.shots = msg.shots;
+    const device = this.gpu.device;
     const boot = await SimBoot.create({
       game: this.game,
       heap,
       tier: threading,
       workers,
       spawn: (i) => WorkerPorts.spawnBrowser(this.jobWorkerUrl, `px-job-${i}`),
-      // The CPU reference swarm, with small pools, until the GPU swarm backend exists.
-      swarm: (layout, tables, seed) => new SwarmReference(layout, tables, { seed }),
-      swarmProfile: 'test',
+      swarm: gpuSwarm
+        ? async (layout, tables, seed) => (this.swarm = await Swarm.create(device, layout, tables, seed, { K: this.game.swarm?.K }))
+        : (layout, tables, seed) => new SwarmReference(layout, tables, { seed }),
+      swarmProfile: gpuSwarm ? perf : 'test',
+      swarmCaps: caps,
     });
     this.sim = boot.sim;
     if (this.shared) {
@@ -139,6 +159,7 @@ export class EngineHost {
         rafInWorker: typeof requestAnimationFrame === 'function',
         perfTier: perf,
         jobWorkers: boot.workers,
+        swarm: boot.swarm ? { backend: gpuSwarm ? 'gpu' : 'cpu', units: boot.swarm.backend.layout.caps.units, shots: boot.swarm.backend.layout.caps.shots } : null,
         format: this.gpu.format,
         features: [...this.gpu.features].sort(),
         manifest: boot.manifest.hash,
@@ -158,20 +179,32 @@ export class EngineHost {
     }
     const sim = this.sim;
     if (!sim || !this.ring) return;
+    if (this.inFlight >= MAX_FRAMES_IN_FLIGHT) {
+      this.stats.gpuWaits++; // the GPU is behind: no sim, no GPU work this frame
+      return;
+    }
     this.busy = true;
     try {
       this.ring.drain(this.applyInput);
+      const swarm = this.swarm;
+      swarm?.harvest();
       const dt = this.last < 0 ? TICK_MS : now - this.last;
       this.last = now;
       this.acc += Math.min(dt, 250);
       const t0 = performance.now();
       let ticks = 0;
-      while (this.acc >= TICK_MS && ticks < MAX_TICKS_PER_FRAME) {
-        const [w0, w1] = this.actions.sample(this.input);
-        sim.stamp(w0, w1);
-        if (!(await sim.step())) break; // stalled on a late swarm block: retry next frame
-        this.acc -= TICK_MS;
-        ticks++;
+      // The GPU swarm encodes this frame's ticks into one submit; no free readback slot = no ticks.
+      const cap = swarm ? Math.min(MAX_TICKS_PER_FRAME, swarm.beginFrame()) : MAX_TICKS_PER_FRAME;
+      try {
+        while (this.acc >= TICK_MS && ticks < cap) {
+          const [w0, w1] = this.actions.sample(this.input);
+          sim.stamp(w0, w1);
+          if (!(await sim.step())) break; // stalled on a late swarm block: retry next frame
+          this.acc -= TICK_MS;
+          ticks++;
+        }
+      } finally {
+        swarm?.endFrame();
       }
       if (this.acc >= TICK_MS) this.acc = TICK_MS - 0.001; // behind: slow down, never skip ticks
       const s = this.stats;
@@ -179,10 +212,24 @@ export class EngineHost {
       s.ticks = ticks;
       s.frameMs = dt;
       s.fps = s.fps ? s.fps + (1000 / Math.max(dt, 1) - s.fps) * 0.1 : 1000 / Math.max(dt, 1);
+      s.readbackP95 = swarm ? swarm.readback.p95() : 0;
       this.render();
+      this.inFlight++;
+      /** @type {GpuDevice} */ (this.gpu).device.queue.onSubmittedWorkDone().then(
+        () => this.inFlight--,
+        () => this.inFlight--,
+      );
       this.frames++;
       if (this.frames % HUD_EVERY === 0) this.writeHud();
-      if (this.frames % 30 === 1) this.scope.postMessage({ type: 'stats', frames: this.frames });
+      if (this.frames % 30 === 1) {
+        const rb = swarm?.readback;
+        this.scope.postMessage({
+          type: 'stats',
+          frames: this.frames,
+          gpuWaits: s.gpuWaits,
+          swarm: rb ? { tick: sim.tick, stalls: sim.stalls, starved: rb.starved, lost: rb.lost, reason: rb.lostReason, slots: rb.slots.map((x) => x.state).join(','), arrived: swarm.arrived.size } : null,
+        });
+      }
     } catch (err) {
       this.fail(err);
     } finally {

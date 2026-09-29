@@ -15,6 +15,8 @@ import { DevReload } from './dev-reload.js';
  * @property {import('../platform/tiers.js').ThreadingTier} threading
  * @property {Record<string, any> | null} engine   engine-reported info (adapter, driver, tiers)
  * @property {number} frames                       frames rendered by the engine worker
+ * @property {number} gpuWaits                     frames the engine skipped because the GPU was behind
+ * @property {Record<string, any> | null} [swarm]  GPU swarm readback state (debug)
  * @property {Record<string, number> | null} hud   the last state-block snapshot, decoded
  * @property {{ dropped: number, retries: number }} bridge input records dropped, state-block read retries
  * @property {string | null} error
@@ -53,6 +55,7 @@ export class MainHost {
       threading: this.threading,
       engine: null,
       frames: 0,
+      gpuWaits: 0,
       hud: null,
       bridge: { dropped: 0, retries: 0 },
       error: null,
@@ -96,6 +99,7 @@ export class MainHost {
     worker.onmessage = (e) => this.onMessage(e.data);
     worker.onerror = (e) => this.fail(`engine worker error: ${e.message}`);
     const workers = this.params.get('workers');
+    const num = (/** @type {string} */ k) => (this.params.get(k) === null ? null : Number(this.params.get(k)));
     worker.postMessage(
       {
         type: 'init',
@@ -107,6 +111,9 @@ export class MainHost {
         driver: this.params.get('driver') ?? 'auto',
         perf: this.params.get('perf'),
         workers: workers === null ? null : Number(workers),
+        swarm: this.params.get('swarm'),
+        units: num('units'),
+        shots: num('shots'),
       },
       { transfer: [offscreen] },
     );
@@ -125,6 +132,8 @@ export class MainHost {
         return;
       case 'stats':
         this.debug.frames = msg.frames;
+        this.debug.gpuWaits = msg.gpuWaits ?? 0;
+        this.debug.swarm = msg.swarm ?? null;
         break;
       case 'error':
         this.fail(msg.message);

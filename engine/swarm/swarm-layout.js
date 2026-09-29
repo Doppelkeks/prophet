@@ -67,7 +67,7 @@ export const LAYOUT_FIELDS = /** @type {const} */ ([
   'aBinStart', 'aBinCursor', 'aBinEntries', 'aUnitFree', 'aShotFree', 'aMisc', 'aScan', 'aReq',
   'inWords', 'inGroups', 'inFires', 'inProxies', 'groupCap', 'fireCap', 'proxyCap', 'cells',
   'outWords', 'oKillsType', 'oKillsSource', 'oProxyDmg', 'oFireBits', 'typeCap', 'sourceCap', 'scanBlocks',
-  'tSin', 'tTypes', 'keySpawnA', 'keySpawnR', 'keyPhase', 'pad0', 'pad1', 'pad2',
+  'tSin', 'tTypes', 'keySpawnA', 'keySpawnR', 'keyPhase', 'aScanTmp', 'pad1', 'pad2',
 ]);
 
 export class SwarmLayout {
@@ -143,8 +143,10 @@ export class SwarmLayout {
     a += c.shots;
     L.aMisc = a;
     a += MISC.WORDS;
-    L.aScan = a; // block sums, then scanned block sums
-    a += 2 * SCAN_BLOCK * 4;
+    L.aScan = a; // per-block sums, scanned in place into block offsets
+    a += SCAN_BLOCK * 4;
+    L.aScanTmp = a; // per-element exclusive prefix inside its block
+    a += scanElems;
     L.aReq = a;
     a += c.fires * REQ_WORDS;
 
@@ -171,7 +173,7 @@ export class SwarmLayout {
     L.keySpawnA = 0;
     L.keySpawnR = 0;
     L.keyPhase = 0;
-    L.pad0 = L.pad1 = L.pad2 = 0;
+    L.pad1 = L.pad2 = 0;
 
     /** Word offsets and sizes by name. */
     this.L = L;
@@ -199,5 +201,32 @@ export class SwarmLayout {
   /** The WGSL declaration of the `Layout` struct (field order = LAYOUT_FIELDS). */
   static wgslStruct() {
     return `struct Layout {\n${LAYOUT_FIELDS.map((f) => `  ${f}: u32,`).join('\n')}\n}\n`;
+  }
+
+  /**
+   * Every constant the kernels share with the JS side, as WGSL `const` declarations, so the two can't
+   * drift apart. Prepended to every swarm kernel with the Layout struct.
+   * @param {Record<string, number>} extra more u32 constants (pass constants of the reference)
+   */
+  static wgslConstants(extra = {}) {
+    /** @type {[string, number][]} */
+    const c = [
+      ['UNIT_ALIVE', UNIT_ALIVE],
+      ['SHOT_ALIVE', SHOT_ALIVE],
+      ['NO_HIT', NO_HIT],
+      ['GROUP_WORDS', GROUP_WORDS],
+      ['FIRE_WORDS', FIRE_WORDS],
+      ['PROXY_WORDS', PROXY_WORDS],
+      ['TYPE_WORDS', TYPE_WORDS],
+      ['REQ_WORDS', REQ_WORDS],
+      ['SCAN_BLOCK', SCAN_BLOCK],
+      ['OUT_MAGIC', OUT_MAGIC],
+      ...Object.entries(IH).map(([k, v]) => /** @type {[string, number]} */ ([`IH_${k}`, v])),
+      ...Object.entries(OH).map(([k, v]) => /** @type {[string, number]} */ ([`OH_${k}`, v])),
+      ...Object.entries(TY).map(([k, v]) => /** @type {[string, number]} */ ([`TY_${k}`, v])),
+      ...Object.entries(MISC).map(([k, v]) => /** @type {[string, number]} */ ([`MISC_${k}`, v])),
+      ...Object.entries(extra),
+    ];
+    return c.map(([k, v]) => `const ${k}: u32 = ${v >>> 0}u;`).join('\n') + '\n';
   }
 }

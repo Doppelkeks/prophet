@@ -17,10 +17,12 @@ export class GpuSwitches {
       switches: [['enable-unsafe-webgpu'], ['ozone-platform', 'x11'], ['use-angle', 'vulkan']],
       features: ['Vulkan', 'VulkanFromANGLE'],
     },
-    // CI / containers without a GPU (verified under xvfb): software GL via ANGLE + SwiftShader Vulkan for WebGPU.
+    // CI / containers without a GPU (verified under xvfb): SwiftShader for GL (ANGLE), for WebGPU, and for the
+    // compositor's Vulkan. Without the Vulkan compositor, configuring a WebGPU canvas loses the device at once
+    // ("A valid external Instance reference no longer exists").
     swiftshader: {
-      switches: [['enable-unsafe-webgpu'], ['enable-unsafe-swiftshader'], ['use-angle', 'swiftshader'], ['use-webgpu-adapter', 'swiftshader']],
-      features: [],
+      switches: [['enable-unsafe-webgpu'], ['enable-unsafe-swiftshader'], ['use-angle', 'swiftshader'], ['use-webgpu-adapter', 'swiftshader'], ['use-vulkan', 'swiftshader']],
+      features: ['Vulkan'],
     },
   };
 

@@ -368,6 +368,8 @@ export class ReadbackRing {
 
 The `mapAsync` promise and the `getMappedRange()` buffer are the only per-frame allocations here, and the WebGPU API forces them.
 
+The implementation is `engine/gpu/readback-ring.js`. By default it has `max(6, K + 2)` slots; spare slots absorb latency spikes before the sim has to stall. It samples the submit → harvest latency, and the HUD shows the p95. A rejected `mapAsync` (device loss) is recorded, and the device-loss path owns recovery.
+
 ## Device loss
 
 `device.lost` resolves after a driver reset, a GPU-process crash (Chromium, Electron), or `device.destroy()` in tests. The engine emits a typed `device-lost` event ([01](01-overview.md#javascript-conventions)) and recovers:

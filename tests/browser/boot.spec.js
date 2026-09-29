@@ -1,6 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { PORTS } from './playwright.config.js';
 
+/** Small swarm pools keep SwiftShader fast; swarm.spec.js covers the large scales. */
+const POOLS = 'units=4096&shots=1024';
+
 /**
  * Opens a page, collects errors, and waits until the boot finished (ok, error or unsupported).
  * @param {import('@playwright/test').Page} page
@@ -49,7 +52,7 @@ async function drive(page, keys, sx, sy) {
 }
 
 test('boots in the shared tier with WebGPU inside the engine worker; PATCH moves', async ({ page }) => {
-  const { px, errors } = await boot(page, '/index.html');
+  const { px, errors } = await boot(page, `/index.html?${POOLS}`);
   expect(px?.error ?? null).toBeNull();
   expect(px?.status).toBe('ok');
   expect(px?.probes.secure).toBe(true);
@@ -74,7 +77,7 @@ for (const [driver, mode] of [
   ['raf', 'worker-raf'],
 ]) {
   test(`runs with the ${mode} frame driver`, async ({ page }) => {
-    const { px, errors } = await boot(page, `/index.html?driver=${driver}`);
+    const { px, errors } = await boot(page, `/index.html?driver=${driver}&${POOLS}`);
     expect(px?.status).toBe('ok');
     expect(px?.engine?.driver).toBe(mode);
     expect(px?.frames).toBeGreaterThan(2);
@@ -84,7 +87,7 @@ for (const [driver, mode] of [
 }
 
 test('falls back to the transfer tier without cross-origin isolation; input and state go by message', async ({ page }) => {
-  const { px, errors } = await boot(page, `http://127.0.0.1:${PORTS.noCoi}/index.html`);
+  const { px, errors } = await boot(page, `http://127.0.0.1:${PORTS.noCoi}/index.html?${POOLS}`);
   expect(px?.probes.coi).toBe(false);
   expect(px?.threading).toBe('transfer');
   expect(px?.status).toBe('ok');

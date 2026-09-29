@@ -156,6 +156,8 @@ sequenceDiagram
    Then one `queue.submit`, followed by `mapAsync` on the slot.
 7. **Background.** Kick async jobs, help drain the job queue until the frame budget is spent, then yield.
 
+**Frames in flight.** The engine never runs more than [two frames](../BUDGETS.md#simulation-constants) of GPU work ahead. `queue.onSubmittedWorkDone()` counts finished frames; a frame that finds two still in flight does no ticks and no GPU work. On a slow GPU the game slows down instead of queueing work without bound, and readback latency stays bounded.
+
 When the frame budget is exceeded, the engine first drops optional work in this order: async job help, then particle emission, then remeshes (it defers them). Only after that does it reduce simulation ticks, which slows game time down; it never skips ticks.
 
 ---

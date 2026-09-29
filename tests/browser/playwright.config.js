@@ -18,7 +18,9 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${PORTS.dev}`,
     channel: 'chromium',
     launchOptions: {
-      args: ['--enable-unsafe-webgpu'],
+      // SwiftShader everywhere: WebGPU, GL (ANGLE) and the compositor's Vulkan. Without the Vulkan compositor,
+      // configuring a WebGPU canvas loses the device at once in headless Chromium.
+      args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-vulkan=swiftshader', '--use-angle=swiftshader'],
       executablePath: process.env.PX_CHROMIUM || undefined,
     },
     trace: 'retain-on-failure',
