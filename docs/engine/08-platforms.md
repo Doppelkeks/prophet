@@ -263,7 +263,38 @@ See [BUDGETS: download & load targets](../BUDGETS.md#download--load-targets) and
   - readback p95
   - device-loss recovery
   - pipeline warm-up time
-- **Electron smoke tests** via Playwright's Electron support: boot, the protocol headers (`crossOriginIsolated === true`), switch sets per OS, and the save round trip.
+- **Electron smoke tests** via Playwright's Electron support: boot, the protocol headers (`crossOriginIsolated === true`), switch sets per OS, and the save round trip. Today `tests/electron/electron.spec.js` checks boot and headers, and (on the repo root, since the bundle compiles the hook out) a device loss recovered with the swarm and the renderer rebuilt.
+
+### Measured on the reference devices
+
+The M1 exit fills this table on every [reference device](../BUDGETS.md#reference-devices), in each shell of the [matrix](#platform-matrix). The **platform report** measures one row:
+- In a browser: `npm run dev`, then open `/index.html?report` (or `?report=<seconds>`; 30 by default).
+- In Electron: `npm run electron:dev -- --px-query=report`.
+
+It plays the demo, then prints the row and the full JSON in a panel with a copy button, and in `window.__px.report` (`engine/app/platform-report.js`, tested by `tests/browser/report.spec.js`). What it records:
+- the threading tier and frame driver;
+- the adapter, features and limits;
+- the pipeline warm-up;
+- readback latency p95 and p99 (p99 also in ticks, for the ≤ K − 1 rule);
+- the swarm's GPU ms per tick and the frame-time p99;
+- a device-loss round trip (dev builds only).
+
+| Date | Shell / browser | OS | Adapter | COI | Threading / driver | Tier | Warm-up | Readback p95 / p99 | Swarm GPU p95 | Frame p99 | Device loss |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| | Electron 44 | Windows 11 (Ryzen 5 5600 + RTX 3060) | | | | | | | | | |
+| | Chrome | Windows 11 (Ryzen 5 5600 + RTX 3060) | | | | | | | | | |
+| | Edge | Windows 11 (Ryzen 5 5600 + RTX 3060) | | | | | | | | | |
+| | Firefox 141+ | Windows 11 (Ryzen 5 5600 + RTX 3060) | | | | | | | | | |
+| | Electron 44 | SteamOS (Steam Deck LCD) | | | | | | | | | |
+| | Safari 26 | macOS 26 (MacBook Air M1) | | | | | | | | | |
+| | Electron 44 | macOS 26 (MacBook Air M1) | | | | | | | | | |
+| | Chrome | macOS 26 (MacBook Air M1) | | | | | | | | | |
+| | Firefox 145+ | macOS 26 (MacBook Air M1) | | | | | | | | | |
+| | Electron 44 | Windows 10/11 (i5-8400 + GTX 1060) | | | | | | | | | |
+| | Chrome | Windows 10/11 (i5-8400 + GTX 1060) | | | | | | | | | |
+| | Electron 44 | Linux desktop (any) | | | | | | | | | |
+
+The only row measured so far is CI's: headless Chromium on SwiftShader, Linux. It is not a reference device, and its timings mean nothing for the budgets.
 - **Steam Deck:** the real device. Scripted runs of boot, a checkpoint, suspend and resume.
 - **Web:** header checks against every deploy target, service-worker update flow tests, and the unsupported-browser screen.
 

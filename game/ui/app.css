@@ -70,6 +70,25 @@
     max-inline-size: 460px;
     white-space: pre-wrap;
   }
+  .report {
+    position: absolute;
+    inset-block-end: calc(var(--space) * 2);
+    inset-inline-start: calc(var(--space) * 2);
+    max-inline-size: min(1100px, calc(100vw - var(--space) * 4));
+    max-block-size: 60vh;
+    overflow: auto;
+    pointer-events: auto;
+  }
+  .report pre {
+    margin: calc(var(--space)) 0 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .report button {
+    font: inherit;
+    margin-block-start: var(--space);
+    cursor: pointer;
+  }
   .unsupported {
     position: absolute;
     inset: 0;

@@ -99,8 +99,8 @@ export class EngineHost {
     this.last = -1;
     this.acc = 0;
     this.stats = { fps: 0, frameMs: 0, simMs: 0, ticks: 0, skipped: 0, readbackP95: 0, gpuWaits: 0, swarmGpuP95: 0 };
-    /** Recent frame intervals, ms (the perf report's p50 and p99). */
-    this.frameTimes = new Samples(512);
+    /** Recent frame intervals, ms (the perf report's p50 and p99): about 30 s at 60 fps. */
+    this.frameTimes = new Samples(2048);
     /** Frames submitted to the GPU and not finished yet. */
     this.inFlight = 0;
     /** Counts a frame of the current device as finished (set per device by #watch). */
@@ -330,7 +330,7 @@ export class EngineHost {
         rafInWorker: typeof requestAnimationFrame === 'function',
         perfTier: perf,
         jobWorkers: boot.workers,
-        swarm: boot.swarm ? { backend: gpuSwarm ? 'gpu' : 'cpu', units: boot.swarm.backend.layout.caps.units, shots: boot.swarm.backend.layout.caps.shots } : null,
+        swarm: boot.swarm ? { backend: gpuSwarm ? 'gpu' : 'cpu', units: boot.swarm.backend.layout.caps.units, shots: boot.swarm.backend.layout.caps.shots, K: boot.swarm.K } : null,
         render: this.renderer ? { k: this.renderer.viewport.k, width: this.renderer.viewport.internalW, height: this.renderer.viewport.internalH } : null,
         format: this.gpu.format,
         features: [...this.gpu.features].sort(),
@@ -417,6 +417,7 @@ export class EngineHost {
             frameP50: this.frameTimes.percentile(0.5),
             frameP99: this.frameTimes.percentile(0.99),
             readbackP95: s.readbackP95,
+            readbackP99: swarm ? swarm.readback.p99() : 0,
             swarmGpu: swarm ? swarm.gpuTiming() : null,
           },
         });

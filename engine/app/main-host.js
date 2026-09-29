@@ -28,6 +28,7 @@ import { DevReload } from './dev-reload.js';
  * @property {{ state: 'ok' | 'lost', recovered: number, reason: string, tick: number }} device WebGPU device
  *   state: device losses recovered, the last reason, and the tick of the swarm reset that followed
  * @property {() => void} loseDevice destroys the engine's device, to test recovery (dev builds only)
+ * @property {Record<string, any> | null} [report] the platform report of `?report` (PlatformReport)
  */
 
 /**

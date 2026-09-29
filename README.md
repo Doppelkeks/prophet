@@ -129,6 +129,7 @@ npm run soak -- --minutes 10  # play the demo and measure GC pauses on every thr
   - `?swarm=cpu` runs the JS reference swarm.
   - `?threading=`, `?driver=`, `?perf=` force a tier.
   - `?timing=pass` splits the swarm's GPU timings per step (`window.__px.perf`); `?timing=off` turns them off.
+  - `?report` measures this machine for the platform matrix: warm-up, readback p95/p99, GPU and frame times, a device-loss round trip. It prints one table row to paste into [08](docs/engine/08-platforms.md#measured-on-the-reference-devices). In Electron: `npm run electron:dev -- --px-query=report`.
 - `window.__px.exportReplay()` returns the run so far; `npm run replay` checks that it replays identically.
 
 **The swarm stress scene:** `/tools/stress/?units=100000&shots=50000&ticks=600` on the dev server. It reports GPU ms per tick, readback latency, pool fill and event overflow ([BUDGETS](docs/BUDGETS.md#stress-ceiling-scene-m2-exit)).

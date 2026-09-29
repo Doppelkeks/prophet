@@ -46,8 +46,8 @@ export class ReadbackRing {
     this.seq = 0;
     /** Frames that found no free slot. */
     this.starved = 0;
-    /** Submit → harvest latencies, in ms. */
-    this.latency = new Samples(256);
+    /** Submit → harvest latencies, in ms: the last 2048 frames (about 30 s at 60 fps). */
+    this.latency = new Samples(2048);
     this.lost = false;
     this.lostReason = '';
   }

@@ -2,6 +2,7 @@
 // Main-thread entry point of SCRAPWAKE.
 import '../../engine/core/dev-global.js';
 import { MainHost } from '../../engine/app/main-host.js';
+import { PlatformReport } from '../../engine/app/platform-report.js';
 import { WorkerUrls } from '../../engine/platform/worker-urls.js';
 import { UiCommand } from '../data/ui-commands.js';
 import { HUD } from '../state/hud-state.js';
@@ -25,6 +26,10 @@ const host = new MainHost({
   },
 });
 host.start();
+
+// `?report[=seconds]`: measure this machine for the platform matrix (docs/engine/08-platforms.md).
+const params = new URLSearchParams(location.search);
+if (params.has('report')) PlatformReport.run(host, { seconds: Number(params.get('report')) || 30 });
 
 /** Tech-demo stress keys: UI commands, so replays carry them (docs/engine/07-ui.md#state-bridge). */
 /** @type {Record<string, number>} */
